@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Notify the Azure webhook that a Codex PR was opened for a Jira issue."""
+"""Notify the Azure webhook about a Codex PR or terminal run result."""
 
 from __future__ import annotations
 
@@ -60,40 +60,70 @@ def _post_json(url: str, payload: dict[str, Any], timeout: int) -> dict[str, Any
         raise RuntimeError(f"Azure Jira PR notification failed: {exc.reason}") from exc
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pr-url", required=True)
-    parser.add_argument("--branch-name", required=True)
-    parser.add_argument("--commit-sha", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--pr-url")
+    mode.add_argument("--status", choices=("blocked", "failed", "no-changes"))
+    parser.add_argument("--branch-name")
+    parser.add_argument("--commit-sha")
     parser.add_argument("--draft", choices=("true", "false"), default="false")
     parser.add_argument("--verification-status", default="passed")
-    args = parser.parse_args()
+    parser.add_argument("--message")
+    return parser
+
+
+def build_payload(args: argparse.Namespace) -> dict[str, Any]:
+    payload = {
+        "issueKey": _required_env("ISSUE_KEY"),
+        "issueUrl": _required_env("ISSUE_URL"),
+        "repository": _required_env("GITHUB_REPOSITORY"),
+        "runUrl": _run_url(),
+    }
+
+    if args.status:
+        if not args.message:
+            raise RuntimeError("--message is required with --status")
+        payload.update(
+            {
+                "status": args.status,
+                "message": args.message.strip(),
+            }
+        )
+        return payload
+
+    if not args.branch_name or not args.commit_sha:
+        raise RuntimeError("--branch-name and --commit-sha are required with --pr-url")
+    payload.update(
+        {
+            "prUrl": args.pr_url,
+            "prTitle": f"{payload['issueKey']}: {_required_env('ISSUE_SUMMARY')}",
+            "branchName": args.branch_name,
+            "commitSha": args.commit_sha,
+            "isDraft": args.draft == "true",
+            "verificationStatus": args.verification_status,
+            "actor": _env("GITHUB_ACTOR"),
+        }
+    )
+    return payload
+
+
+def main() -> int:
+    args = build_parser().parse_args()
 
     notify_url = _env("CODEX_JIRA_PR_NOTIFY_URL")
     if not notify_url:
         print(
             "::warning::CODEX_JIRA_PR_NOTIFY_URL is not configured; "
-            "skipping Jira Automation PR notification."
+            "skipping Jira Automation notification."
         )
         return 0
 
-    payload = {
-        "issueKey": _required_env("ISSUE_KEY"),
-        "issueUrl": _required_env("ISSUE_URL"),
-        "prUrl": args.pr_url,
-        "prTitle": f"{_required_env('ISSUE_KEY')}: {_required_env('ISSUE_SUMMARY')}",
-        "repository": _required_env("GITHUB_REPOSITORY"),
-        "branchName": args.branch_name,
-        "commitSha": args.commit_sha,
-        "isDraft": args.draft == "true",
-        "verificationStatus": args.verification_status,
-        "actor": _env("GITHUB_ACTOR"),
-        "runUrl": _run_url(),
-    }
+    payload = build_payload(args)
 
     timeout = int(_env("CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS", "10"))
     result = _post_json(notify_url, payload, timeout)
-    print(f"Azure Jira PR notification accepted for {payload['issueKey']}: {result}")
+    print(f"Azure Jira notification accepted for {payload['issueKey']}: {result}")
     return 0
 
 

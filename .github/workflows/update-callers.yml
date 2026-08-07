@@ -1,0 +1,111 @@
+name: Update caller workflow pins
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/runtime/**
+      - .github/schemas/**
+      - .github/scripts/**
+      - .github/workflows/codex-implement.yml
+      - .github/workflows/codex-review-feedback.yml
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Shared workflow commit to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-caller-pin-release
+  cancel-in-progress: false
+
+jobs:
+  update-caller:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repository:
+          - hmcts/juror-er-portal
+          - hmcts/juror-public
+          - hmcts/juror-bureau
+          - hmcts/juror-api
+          - hmcts/juror-scheduler-execution
+          - hmcts/juror-pnc
+          - hmcts/juror-scheduler-api
+    env:
+      GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
+      EXPECTED_PUBLISHER: ${{ vars.BOT_PUBLISHER_LOGIN }}
+      TARGET_REPOSITORY: ${{ matrix.repository }}
+      RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
+
+    steps:
+      - name: Verify release identity and revision
+        run: |
+          set -euo pipefail
+          [[ "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test -n "${GH_TOKEN}"
+          test -n "${EXPECTED_PUBLISHER}"
+          test "$(gh api user --jq .login)" = "${EXPECTED_PUBLISHER}"
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_SHA}" >/dev/null
+
+      - name: Raise caller pin update
+        env:
+          TARGET_BRANCH: master
+        run: |
+          set -euo pipefail
+
+          branch="codex/update-agent-workflows-${RELEASE_SHA:0:12}"
+          base_sha="$(gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${TARGET_BRANCH}" --jq .object.sha)"
+
+          if ! gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${branch}" >/dev/null 2>&1; then
+            gh api --method POST "repos/${TARGET_REPOSITORY}/git/refs" \
+              -f ref="refs/heads/${branch}" \
+              -f sha="${base_sha}" >/dev/null
+          fi
+
+          changed=false
+          for path in .github/workflows/codex_jira_dispatch.yml .github/workflows/codex_pr_review.yml; do
+            metadata="$(gh api "repos/${TARGET_REPOSITORY}/contents/${path}?ref=${branch}" 2>/dev/null || true)"
+            if [[ -z "${metadata}" ]]; then
+              echo "${TARGET_REPOSITORY} does not contain ${path}; skipping this release."
+              exit 0
+            fi
+
+            blob_sha="$(jq -r .sha <<<"${metadata}")"
+            content="$(jq -r .content <<<"${metadata}" | base64 --decode)"
+            updated="$(sed -E "s#(hmcts/codex-agent-workflows/.github/workflows/[^@]+@)[0-9a-f]{40}#\\1${RELEASE_SHA}#g" <<<"${content}")"
+            if [[ "${updated}" == "${content}" ]]; then
+              continue
+            fi
+
+            encoded="$(printf '%s\n' "${updated}" | base64 | tr -d '\n')"
+            gh api --method PUT "repos/${TARGET_REPOSITORY}/contents/${path}" \
+              -f message="Update Codex shared workflows to ${RELEASE_SHA:0:12}" \
+              -f content="${encoded}" \
+              -f sha="${blob_sha}" \
+              -f branch="${branch}" >/dev/null
+            changed=true
+          done
+
+          if [[ "${changed}" != "true" ]]; then
+            echo "${TARGET_REPOSITORY} already uses ${RELEASE_SHA}."
+            exit 0
+          fi
+
+          existing="$(gh pr list --repo "${TARGET_REPOSITORY}" --head "${branch}" --state open --json url --jq '.[0].url // empty')"
+          if [[ -n "${existing}" ]]; then
+            echo "Caller update already open: ${existing}"
+            exit 0
+          fi
+
+          gh pr create \
+            --repo "${TARGET_REPOSITORY}" \
+            --base "${TARGET_BRANCH}" \
+            --head "${branch}" \
+            --title "Update Codex shared workflows to ${RELEASE_SHA:0:12}" \
+            --body "Pins the Juror Codex caller workflows to the reviewed shared release at \`${RELEASE_SHA}\`."

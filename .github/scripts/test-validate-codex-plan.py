@@ -132,6 +132,10 @@ class ValidateCodexPlanTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         outputs = self.outputs(root)
         self.assertEqual(outputs["ready_to_implement"], "false")
+        self.assertEqual(
+            outputs["blockers_summary"],
+            "The ticket does not identify the failing behavior.",
+        )
         self.assertNotIn("approval_required", outputs)
 
         materialized, _ = self.run_materializer(

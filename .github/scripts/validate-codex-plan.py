@@ -267,6 +267,7 @@ def validate_action_result() -> int:
     write_output("plan_sha256", plan_sha256)
     write_output("plan_payload", base64.b64encode(plan_bytes).decode("ascii"))
     write_output("planned_path_count", str(len(plan["implementation_steps"])))
+    write_output("blockers_summary", "; ".join(plan["blockers"][:3])[:2000])
     return 0
 
 

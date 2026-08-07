@@ -15,4 +15,4 @@ Each caller repository must provide the thin wrappers and verification adapter d
 
 ## Release policy
 
-Changes to reusable workflows require CODEOWNERS review. Consumers adopt releases through pull requests that update the full commit SHA in their local wrapper workflows.
+Changes to reusable workflows require CODEOWNERS review. A push to `main` runs `Update caller workflow pins`, which uses the restricted bot identity to raise full-SHA update PRs in every onboarded Juror repository. The workflow skips repositories that have not yet merged their caller wrappers.
