@@ -64,6 +64,9 @@ jobs:
       pr_number: ${{ steps.detect.outputs.pr_number }}
       head_ref: ${{ steps.detect.outputs.head_ref }}
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Detect Codex PR
         id: detect
         env:
@@ -199,6 +202,9 @@ jobs:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Checkout default branch
         uses: actions/checkout@v7
         with:
@@ -211,14 +217,14 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
 
       - name: Verify runner toolchain
-        run: ./.github/scripts/codex-runner-preflight.sh
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-runner-preflight.sh
 
       - name: Prepare review-feedback prompt
         id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
-        run: ./.github/scripts/codex-pr-review-feedback.sh
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-feedback.sh
 
       - name: Run Codex on review feedback
         id: codex-action
@@ -251,6 +257,9 @@ jobs:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Checkout trusted collector
         uses: actions/checkout@v7
         with:
@@ -279,7 +288,7 @@ jobs:
           BASE_SHA: ${{ needs.codex-review-generate-action.outputs.base_sha }}
           COMMENT_AUTHOR: ${{ needs.codex-review-generate-action.outputs.comment_author }}
           COMMENT_URL: ${{ needs.codex-review-generate-action.outputs.comment_url }}
-        run: ./.github/scripts/codex-pr-review-collect.sh
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-collect.sh
 
       - name: Upload Codex review output
         uses: actions/upload-artifact@v7
@@ -308,6 +317,9 @@ jobs:
       EXPECTED_HEAD_SHA: ${{ needs.codex-review-generate-action.outputs.head_sha }}
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Checkout default branch
         uses: actions/checkout@v7
         with:
@@ -319,11 +331,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
           BOT_PUBLISHER_LOGIN: ${{ inputs.publisher_login }}
-        run: python3 -I .github/scripts/codex-verify-publisher.py
+        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
 
       - name: Copy trusted publish script
         run: |
-          cp .github/scripts/codex-pr-review-publish.sh "$RUNNER_TEMP/codex-pr-review-publish.sh"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-publish.sh "$RUNNER_TEMP/codex-pr-review-publish.sh"
           chmod +x "$RUNNER_TEMP/codex-pr-review-publish.sh"
 
       - name: Download Codex review output
@@ -380,6 +392,9 @@ jobs:
       REQUIRED_STATUS_TIMEOUT_SECONDS: ${{ inputs.required_status_timeout_seconds }}
       REQUIRED_STATUS_POLL_SECONDS: ${{ inputs.required_status_poll_seconds }}
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Checkout trusted status scripts
         uses: actions/checkout@v7
         with:
@@ -391,8 +406,8 @@ jobs:
         run: |
           set +e
           {
-            ./.github/scripts/codex-wait-pr-status.sh &&
-              ./.github/scripts/codex-check-sonar-quality-gate.sh
+            ${CODEX_RUNTIME_PATH}/.github/scripts/codex-wait-pr-status.sh &&
+              ${CODEX_RUNTIME_PATH}/.github/scripts/codex-check-sonar-quality-gate.sh
           } >"$RUNNER_TEMP/codex-review-external-status.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/codex-review-external-status.log"
@@ -434,6 +449,9 @@ jobs:
       base_sha: ${{ steps.source.outputs.base_sha }}
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Checkout trusted verifier tools
         uses: actions/checkout@v7
         with:
@@ -470,7 +488,7 @@ jobs:
           test -z "$(git config --local --get-all http.https://github.com/.extraheader || true)"
           test -z "$(git config --local --get-all credential.helper || true)"
           tar -czf "$RUNNER_TEMP/codex-review-published-source.tar.gz" .
-          cp ../trusted/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
           cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
           echo "head_sha=${PUBLISHED_HEAD_SHA}" >>"$GITHUB_OUTPUT"
           echo "base_sha=${BASE_SHA}" >>"$GITHUB_OUTPUT"
@@ -519,6 +537,9 @@ jobs:
       SOURCE_INCLUDES_INPUT_PATCH: 'true'
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Checkout trusted repair tooling
         uses: actions/checkout@v7
         with:
@@ -527,7 +548,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify runner toolchain
-        run: ./.github/scripts/codex-runner-preflight.sh
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-runner-preflight.sh
 
       - name: Download published Codex review output
         uses: actions/download-artifact@v8
@@ -547,7 +568,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INPUT_DIR: ${{ runner.temp }}/codex-input
           FAILURE_DIR: ${{ runner.temp }}/codex-failure
-        run: ./.github/scripts/codex-pr-review-repair.sh
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-repair.sh
 
       - name: Run Codex external-status repair
         id: codex-action
@@ -587,6 +608,9 @@ jobs:
       CODEX_OUTPUT_ARTIFACT: codex-review-output-external-repair-1
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Checkout trusted collector
         uses: actions/checkout@v7
         with:
@@ -613,7 +637,7 @@ jobs:
           BASE_SHA: ${{ needs.prepare-published-review-repair-source.outputs.base_sha }}
           COMMENT_AUTHOR: ${{ needs.codex-review-external-repair-action.outputs.comment_author }}
           COMMENT_URL: ${{ needs.codex-review-external-repair-action.outputs.comment_url }}
-        run: ./.github/scripts/codex-pr-review-repair-collect.sh
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-repair-collect.sh
 
       - name: Upload external-status repair output
         uses: actions/upload-artifact@v7
@@ -651,6 +675,9 @@ jobs:
       CODEX_FAILURE_ARTIFACT: codex-review-external-repair-verification-failure-1
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Download credential-free published review source
         uses: actions/download-artifact@v8
         with:
@@ -747,6 +774,9 @@ jobs:
       CODEX_VERIFIED_ARTIFACT: ${{ needs.codex-review-external-repair-verify.outputs.verified_artifact }}
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Checkout trusted publisher
         uses: actions/checkout@v7
         with:
@@ -758,11 +788,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
           BOT_PUBLISHER_LOGIN: ${{ inputs.publisher_login }}
-        run: python3 -I .github/scripts/codex-verify-publisher.py
+        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
 
       - name: Copy trusted publish script
         run: |
-          cp .github/scripts/codex-pr-review-publish.sh "$RUNNER_TEMP/codex-pr-review-publish.sh"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-publish.sh "$RUNNER_TEMP/codex-pr-review-publish.sh"
           chmod +x "$RUNNER_TEMP/codex-pr-review-publish.sh"
 
       - name: Download external-status repair output
@@ -807,6 +837,9 @@ jobs:
       REQUIRED_STATUS_POLL_SECONDS: ${{ inputs.required_status_poll_seconds }}
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Checkout trusted status scripts
         uses: actions/checkout@v7
         with:
@@ -817,8 +850,8 @@ jobs:
         id: verify
         run: |
           set +e
-          ./.github/scripts/codex-wait-pr-status.sh &&
-            ./.github/scripts/codex-check-sonar-quality-gate.sh
+          ${CODEX_RUNTIME_PATH}/.github/scripts/codex-wait-pr-status.sh &&
+            ${CODEX_RUNTIME_PATH}/.github/scripts/codex-check-sonar-quality-gate.sh
           status=$?
           if [[ "${status}" -eq 0 ]]; then
             echo "passed=true" >>"$GITHUB_OUTPUT"
@@ -845,6 +878,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {}
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Fail after bounded external-status repair
         run: |
           echo "Codex review feedback still fails external Jenkins or Sonar verification after one repair attempt."
@@ -862,6 +898,9 @@ jobs:
       artifact: codex-review-verification-source
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Checkout trusted verifier tools
         uses: actions/checkout@v7
         with:
@@ -892,7 +931,7 @@ jobs:
           test -z "$(git config --local --get-all http.https://github.com/.extraheader || true)"
           test -z "$(git config --local --get-all credential.helper || true)"
           tar -czf "$RUNNER_TEMP/codex-review-source.tar.gz" .
-          cp ../trusted/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
           cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
 
       - name: Upload credential-free review source
@@ -921,6 +960,9 @@ jobs:
       LOCAL_PIPELINE_MODE: fast
 
     steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@bf00dc3d03902fd26ba610a8b2caccb2bf7c9081
+
       - name: Download credential-free review source
         uses: actions/download-artifact@v8
         with:
