@@ -15,16 +15,14 @@ The publisher token must belong to `BOT_PUBLISHER_LOGIN` and be restricted to th
 
 ## Required repository files
 
-Callers retain the trusted scripts and schemas consumed by the reusable workflow:
+Callers retain only repository-owned configuration and verification:
 
-- `.github/schemas/codex-plan-result.schema.json`
-- `.github/schemas/codex-patch-result.schema.json`
-- `.github/scripts/codex-*.sh`
-- `.github/scripts/collect-codex-patch-result.py`
-- `.github/scripts/validate-codex-plan.py`
-- `.github/scripts/codex-verify-publisher.py`
-- `.github/scripts/notify-jira-automation.py`
+- `.github/workflows/codex_jira_dispatch.yml`
+- `.github/workflows/codex_pr_review.yml`
 - `bin/codex-local-pipeline.sh`
+- `AGENTS.md`
+
+Trusted planning, collection, repair, publication and security-validation scripts are loaded from this repository by `.github/actions/runtime` at an immutable commit SHA. Caller repositories must not copy or override that runtime.
 
 The local pipeline must be credential-free and must not fetch or execute untrusted remote content. Existing branch-required Jenkins, Sonar, functional and smoke checks remain authoritative after publication.
 

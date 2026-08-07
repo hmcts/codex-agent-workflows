@@ -2,7 +2,7 @@
 
 Private reusable GitHub Actions workflows for HMCTS Codex implementation agents.
 
-The repository centralises the trusted orchestration used by application repositories while keeping repository-specific instructions and verification adapters in each caller. Callers must pin reusable workflows to a full commit SHA and pass only the declared secrets.
+The repository centralises the trusted orchestration, scripts and structured-output schemas used by application repositories while keeping repository-specific instructions and verification adapters in each caller. Callers must pin reusable workflows to a full commit SHA and pass only the declared secrets.
 
 ## Workflows
 
@@ -11,7 +11,7 @@ The repository centralises the trusted orchestration used by application reposit
 
 ## Caller requirements
 
-Each caller repository must provide the scripts and schemas documented in [`docs/caller-contract.md`](docs/caller-contract.md). Model-facing jobs run on a repository-scoped ARC runner. Collection, verification and publication run in fresh trusted jobs.
+Each caller repository must provide the thin wrappers and verification adapter documented in [`docs/caller-contract.md`](docs/caller-contract.md). Model-facing jobs run on a repository-scoped ARC runner. Collection, verification and publication run in fresh trusted jobs using the immutable runtime action packaged with this repository.
 
 ## Release policy
 
