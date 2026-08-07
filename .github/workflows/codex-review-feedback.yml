@@ -7,6 +7,11 @@ on:
         description: Repository-scoped ARC runner scale-set label
         required: true
         type: string
+      node_version:
+        description: Node.js version provisioned for credential-free verification
+        required: false
+        default: "22"
+        type: string
       publisher_login:
         description: Trusted machine-user login associated with BOT_GITHUB_TOKEN
         required: true
@@ -661,6 +666,14 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Download external-status repair output
         uses: actions/download-artifact@v8
         with:
@@ -922,6 +935,14 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Download Codex review output
         uses: actions/download-artifact@v8
