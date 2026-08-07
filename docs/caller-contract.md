@@ -2,16 +2,16 @@
 
 ## Required dispatch inputs
 
-The caller forwards Jira issue key, summary, description, status, assignee and URL. It also supplies its repository-scoped runner label, Sonar configuration, required status context and trusted publisher login.
+The caller forwards Jira issue key, summary, description, status, assignee and URL. It also supplies its repository-scoped runner label, Sonar configuration, required status context and the client ID of the HMCTS-owned Codex GitHub App.
 
 ## Required secrets
 
 - `CODEX_OPENAI_API_KEY`
-- `BOT_GITHUB_TOKEN`
+- `CODEX_GITHUB_APP_PRIVATE_KEY`
 - `CODEX_JIRA_PR_NOTIFY_URL`
 - `CODEX_SONAR_TOKEN`
 
-The publisher token must belong to `BOT_PUBLISHER_LOGIN` and be restricted to the caller repository. Secrets are unavailable to generated code and credential-free verification jobs.
+Each trusted publisher job mints a short-lived GitHub App installation token restricted to the caller repository. The App bot identity is verified and derived at runtime; no publisher PAT or stored login is required. Secrets are unavailable to generated code and credential-free verification jobs.
 
 ## Required repository files
 

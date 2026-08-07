@@ -12,8 +12,8 @@ on:
         required: false
         default: "22"
         type: string
-      publisher_login:
-        description: Trusted machine-user login associated with BOT_GITHUB_TOKEN
+      github_app_client_id:
+        description: Client ID of the HMCTS-owned Codex GitHub App
         required: true
         type: string
       sonar_host_url:
@@ -42,7 +42,7 @@ on:
     secrets:
       CODEX_OPENAI_API_KEY:
         required: true
-      BOT_GITHUB_TOKEN:
+      CODEX_GITHUB_APP_PRIVATE_KEY:
         required: true
       CODEX_SONAR_TOKEN:
         required: true
@@ -65,7 +65,7 @@ jobs:
       head_ref: ${{ steps.detect.outputs.head_ref }}
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Detect Codex PR
         id: detect
@@ -203,7 +203,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -258,7 +258,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Checkout trusted collector
         uses: actions/checkout@v7
@@ -318,7 +318,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -327,10 +327,25 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify trusted publisher credentials
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ inputs.github_app_client_id }}
+          private-key: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Verify GitHub App publisher
+        id: publisher
         env:
-          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
-          BOT_PUBLISHER_LOGIN: ${{ inputs.publisher_login }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GITHUB_APP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
         run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
 
       - name: Copy trusted publish script
@@ -353,8 +368,9 @@ jobs:
       - name: Publish Codex review feedback
         id: publish
         env:
-          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
-          BOT_PUBLISHER_LOGIN: ${{ inputs.publisher_login }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BOT_PUBLISHER_LOGIN: ${{ steps.publisher.outputs.publisher_login }}
+          BOT_PUBLISHER_EMAIL: ${{ steps.publisher.outputs.publisher_email }}
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           VERIFICATION_DIR: ${{ runner.temp }}/codex-verified
         run: "$RUNNER_TEMP/codex-pr-review-publish.sh"
@@ -393,7 +409,7 @@ jobs:
       REQUIRED_STATUS_POLL_SECONDS: ${{ inputs.required_status_poll_seconds }}
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Checkout trusted status scripts
         uses: actions/checkout@v7
@@ -450,7 +466,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Checkout trusted verifier tools
         uses: actions/checkout@v7
@@ -538,7 +554,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Checkout trusted repair tooling
         uses: actions/checkout@v7
@@ -609,7 +625,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Checkout trusted collector
         uses: actions/checkout@v7
@@ -676,7 +692,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Download credential-free published review source
         uses: actions/download-artifact@v8
@@ -775,7 +791,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Checkout trusted publisher
         uses: actions/checkout@v7
@@ -784,10 +800,25 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify trusted publisher credentials
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ inputs.github_app_client_id }}
+          private-key: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Verify GitHub App publisher
+        id: publisher
         env:
-          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
-          BOT_PUBLISHER_LOGIN: ${{ inputs.publisher_login }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GITHUB_APP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
         run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
 
       - name: Copy trusted publish script
@@ -810,8 +841,9 @@ jobs:
       - name: Re-publish external-status repair
         id: publish
         env:
-          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
-          BOT_PUBLISHER_LOGIN: ${{ inputs.publisher_login }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BOT_PUBLISHER_LOGIN: ${{ steps.publisher.outputs.publisher_login }}
+          BOT_PUBLISHER_EMAIL: ${{ steps.publisher.outputs.publisher_email }}
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           VERIFICATION_DIR: ${{ runner.temp }}/codex-verified
         run: "$RUNNER_TEMP/codex-pr-review-publish.sh"
@@ -838,7 +870,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Checkout trusted status scripts
         uses: actions/checkout@v7
@@ -879,7 +911,7 @@ jobs:
     permissions: {}
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Fail after bounded external-status repair
         run: |
@@ -899,7 +931,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Checkout trusted verifier tools
         uses: actions/checkout@v7
@@ -961,7 +993,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8ac577b91ff18f8d38864d7b92d920e37732f2d3
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@5128f12aeee1ef45bb6b812e7ed0bf6620ea23aa
 
       - name: Download credential-free review source
         uses: actions/download-artifact@v8

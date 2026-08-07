@@ -4,25 +4,25 @@ This rollout stays disabled until the shared workflow, all seven callers, the Az
 
 ## GitHub identity and repository configuration
 
-Use a dedicated HMCTS machine user with write access to all seven Juror repositories. A fine-grained token cannot grant more access than its owner already has.
-
-Grant the token access only to the seven Juror repositories, with:
+Create an HMCTS-owned GitHub App for Codex publication and install it only on `hmcts/codex-agent-workflows`, the seven Juror repositories and the two Apps Reg repositories. Grant the App:
 
 - Metadata: read
 - Contents: read and write
 - Pull requests: read and write
+- Issues: read and write
+- Workflows: read and write
 
 Configure each Juror repository with:
 
 - Actions secret `CODEX_OPENAI_API_KEY`
-- Actions secret `BOT_GITHUB_TOKEN`
+- Actions secret `CODEX_GITHUB_APP_PRIVATE_KEY`
 - Actions secret `CODEX_JIRA_PR_NOTIFY_URL`
 - Actions secret `CODEX_SONAR_TOKEN`
-- Actions variable `BOT_PUBLISHER_LOGIN`, set to the exact machine-user login
+- Actions variable `CODEX_GITHUB_APP_CLIENT_ID`
 
-Configure `hmcts/codex-agent-workflows` with the same `BOT_GITHUB_TOKEN` and `BOT_PUBLISHER_LOGIN` for release pin-update PRs. Keep private reusable-workflow access limited to the HMCTS organisation. Require CODEOWNERS review and prevent force pushes or branch deletion on `main`.
+Configure `hmcts/codex-agent-workflows` with the same App client ID and private key for release pin-update PRs. Keep private reusable-workflow access limited to the HMCTS organisation. Require CODEOWNERS review and prevent force pushes or branch deletion on `main`.
 
-The publisher token is available only to fresh trusted publication jobs. Generated code and verification jobs must not receive the OpenAI API key, publisher token or Jira callback URL.
+The App private key and short-lived installation token are available only to fresh trusted token-minting and publication steps. Generated code and verification jobs must not receive the OpenAI API key, App credentials, publisher token or Jira callback URL.
 
 ## Jira field and dispatch rule
 
