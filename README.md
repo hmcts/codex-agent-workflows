@@ -13,6 +13,8 @@ The repository centralises the trusted orchestration, scripts and structured-out
 
 Each caller repository must provide the thin wrappers and verification adapter documented in [`docs/caller-contract.md`](docs/caller-contract.md). Model-facing jobs run on a repository-scoped ARC runner. Collection, verification and publication run in fresh trusted jobs using the immutable runtime action packaged with this repository.
 
+The coordinated Juror configuration and activation sequence is documented in [`docs/juror-rollout.md`](docs/juror-rollout.md).
+
 ## Release policy
 
 Changes to reusable workflows require CODEOWNERS review. A push to `main` runs `Update caller workflow pins`, which uses the restricted bot identity to raise full-SHA update PRs in every onboarded Juror repository. The workflow skips repositories that have not yet merged their caller wrappers.
