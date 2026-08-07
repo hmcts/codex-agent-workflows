@@ -52,6 +52,12 @@ jobs:
           test -n "${EXPECTED_PUBLISHER}"
           test "$(gh api user --jq .login)" = "${EXPECTED_PUBLISHER}"
           gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_SHA}" >/dev/null
+          merge_base="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/compare/${RELEASE_SHA}...main" \
+              --jq .merge_base_commit.sha
+          )"
+          test "${merge_base}" = "${RELEASE_SHA}"
 
       - name: Raise caller pin update
         env:
