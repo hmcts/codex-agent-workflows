@@ -472,42 +472,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Upload unverified Codex output for draft publication
-        if: steps.verify.outputs.passed != 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ env.CODEX_DRAFT_ARTIFACT }}
-          path: |
-            ${{ runner.temp }}/codex-output/codex-pr-body.md
-            ${{ runner.temp }}/codex-output/guardrail-changes.txt
-            ${{ runner.temp }}/codex-output/verification.env
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload unverified Codex output for draft publication
-        if: steps.verify.outputs.passed != 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ env.CODEX_DRAFT_ARTIFACT }}
-          path: |
-            ${{ runner.temp }}/codex-output/codex-pr-body.md
-            ${{ runner.temp }}/codex-output/guardrail-changes.txt
-            ${{ runner.temp }}/codex-output/verification.env
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload unverified Codex output for draft publication
-        if: steps.verify.outputs.passed != 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ env.CODEX_DRAFT_ARTIFACT }}
-          path: |
-            ${{ runner.temp }}/codex-output/codex-pr-body.md
-            ${{ runner.temp }}/codex-output/guardrail-changes.txt
-            ${{ runner.temp }}/codex-output/verification.env
-          if-no-files-found: error
-          retention-days: 1
-
       - name: Upload verification failure
         if: steps.verify.outputs.passed != 'true'
         uses: actions/upload-artifact@v7
@@ -729,6 +693,18 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
+          path: |
+            ${{ runner.temp }}/codex-output/codex-pr-body.md
+            ${{ runner.temp }}/codex-output/guardrail-changes.txt
+            ${{ runner.temp }}/codex-output/verification.env
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload unverified Codex output for draft publication
+        if: steps.verify.outputs.passed != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CODEX_DRAFT_ARTIFACT }}
           path: |
             ${{ runner.temp }}/codex-output/codex-pr-body.md
             ${{ runner.temp }}/codex-output/guardrail-changes.txt
@@ -964,6 +940,18 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Upload unverified Codex output for draft publication
+        if: steps.verify.outputs.passed != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CODEX_DRAFT_ARTIFACT }}
+          path: |
+            ${{ runner.temp }}/codex-output/codex-pr-body.md
+            ${{ runner.temp }}/codex-output/guardrail-changes.txt
+            ${{ runner.temp }}/codex-output/verification.env
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Upload verification failure
         if: steps.verify.outputs.passed != 'true'
         uses: actions/upload-artifact@v7
@@ -1185,6 +1173,18 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
+          path: |
+            ${{ runner.temp }}/codex-output/codex-pr-body.md
+            ${{ runner.temp }}/codex-output/guardrail-changes.txt
+            ${{ runner.temp }}/codex-output/verification.env
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload unverified Codex output for draft publication
+        if: steps.verify.outputs.passed != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CODEX_DRAFT_ARTIFACT }}
           path: |
             ${{ runner.temp }}/codex-output/codex-pr-body.md
             ${{ runner.temp }}/codex-output/guardrail-changes.txt
