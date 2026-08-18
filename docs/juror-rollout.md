@@ -11,6 +11,7 @@ Create an HMCTS-owned GitHub App for Codex publication and install it only on `h
 - Pull requests: read and write
 - Issues: read and write
 - Workflows: read and write
+- Actions: read and write
 
 Configure each Juror repository with:
 
@@ -24,25 +25,27 @@ Configure `hmcts/codex-agent-workflows` with the same App client ID and private 
 
 The App private key and short-lived installation token are available only to fresh trusted token-minting and publication steps. Generated code and verification jobs must not receive the OpenAI API key, App credentials, publisher token or Jira callback URL.
 
-## Jira field and dispatch rule
+## Jira repository labels and dispatch rule
 
-Create a required single-select field named `Codex repository` for the JS project with these values:
+Route each JS issue using exactly one of these labels:
 
-- `hmcts/juror-er-portal`
-- `hmcts/juror-public`
-- `hmcts/juror-bureau`
-- `hmcts/juror-api`
-- `hmcts/juror-scheduler-execution`
-- `hmcts/juror-pnc`
-- `hmcts/juror-scheduler-api`
+| Jira label | GitHub repository |
+|---|---|
+| `codex-repo-juror-er-portal` | `hmcts/juror-er-portal` |
+| `codex-repo-juror-public` | `hmcts/juror-public` |
+| `codex-repo-juror-bureau` | `hmcts/juror-bureau` |
+| `codex-repo-juror-api` | `hmcts/juror-api` |
+| `codex-repo-juror-scheduler-execution` | `hmcts/juror-scheduler-execution` |
+| `codex-repo-juror-pnc` | `hmcts/juror-pnc` |
+| `codex-repo-juror-scheduler-api` | `hmcts/juror-scheduler-api` |
 
 The dispatch rule triggers when `codex-ready` is added. It must:
 
 1. Stop if the issue is in a completed status.
-2. Stop and comment if `Codex repository` is empty.
+2. Stop and comment unless exactly one approved `codex-repo-*` label is present.
 3. Transition the issue to `In Progress` when required.
 4. Remove `codex-ready` and add `codex-running` before dispatch.
-5. POST the issue key, summary, description, status, assignee, labels, issue URL and selected repository to the Azure Function.
+5. POST the issue key, summary, description, status, assignee, labels, issue URL and initiating display name to the Azure Function. The Function resolves the repository from the label.
 6. Restore a usable state and comment when dispatch itself is rejected.
 
 The JS callback rule consumes the Azure Function's project-specific webhook. For `pr-created`, transition to `Peer Review`, add `pr-ready`, remove `codex-running` and comment with the PR and workflow links. For `codex-blocked`, `codex-failed` or `codex-no-changes`, remove `codex-running` and comment with the supplied message and workflow link.
@@ -63,7 +66,7 @@ The JS callback rule consumes the Azure Function's project-specific webhook. For
 
 Run one controlled Jira-to-PR test in every repository. Confirm:
 
-- the required repository field routes to exactly one repository;
+- exactly one approved repository label routes to the intended repository;
 - the issue moves to `In Progress` and duplicate events do not start concurrent runs;
 - planning uses `gpt-5.6-sol`/`ultra` and auto-approves every actionable structured plan;
 - implementation and repair use `gpt-5.6-sol`/`medium`;
