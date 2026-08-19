@@ -60,6 +60,8 @@ class WorkflowContractTests(unittest.TestCase):
             'parser.add_argument("--base-sha", required=True)',
             recovery_helper.stdout,
         )
+        self.assertIn("recover_fresh_pull_request", recovery_helper.stdout)
+        self.assertIn("fetch_pull_request_by_number", recovery_helper.stdout)
 
     def test_both_reusable_workflows_require_jira_callback_secret(self):
         for workflow in (IMPLEMENT_WORKFLOW, REVIEW_WORKFLOW):
