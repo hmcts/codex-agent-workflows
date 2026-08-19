@@ -1549,7 +1549,7 @@ jobs:
           persist-credentials: false
 
       - name: Enforce pull-request credential isolation
-        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.py --repository-root "$GITHUB_WORKSPACE"
+        run: ruby --disable-gems ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb --repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -1706,7 +1706,7 @@ jobs:
           persist-credentials: false
 
       - name: Enforce pull-request credential isolation
-        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.py --repository-root "$GITHUB_WORKSPACE"
+        run: ruby --disable-gems ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb --repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -2246,7 +2246,7 @@ jobs:
           persist-credentials: false
 
       - name: Enforce pull-request credential isolation
-        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.py --repository-root "$GITHUB_WORKSPACE"
+        run: ruby --disable-gems ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb --repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token

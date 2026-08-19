@@ -201,7 +201,7 @@ if [[ ! -f "${safety_gate_path}" || -L "${safety_gate_path}" ]]; then
   echo "Missing trusted PR credential safety gate: ${safety_gate_path}" >&2
   exit 1
 fi
-run_sanitized python3 -I "${safety_gate_path}" --repository-root .
+run_sanitized ruby --disable-gems "${safety_gate_path}" --repository-root .
 
 detect_guardrail_changes
 append_guardrail_warning

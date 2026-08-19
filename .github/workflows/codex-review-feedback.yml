@@ -339,7 +339,7 @@ jobs:
           persist-credentials: false
 
       - name: Enforce pull-request credential isolation
-        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.py --repository-root "$GITHUB_WORKSPACE"
+        run: ruby --disable-gems ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb --repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -519,7 +519,7 @@ jobs:
           test -z "$(git config --local --get-all credential.helper || true)"
           tar -czf "$RUNNER_TEMP/codex-review-published-source.tar.gz" .
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
-          cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.py "$RUNNER_TEMP/trusted-check-codex-pr-safety.py"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb "$RUNNER_TEMP/trusted-check-codex-pr-safety.rb"
           cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
           echo "head_sha=${PUBLISHED_HEAD_SHA}" >>"$GITHUB_OUTPUT"
           echo "base_sha=${BASE_SHA}" >>"$GITHUB_OUTPUT"
@@ -531,7 +531,7 @@ jobs:
           path: |
             ${{ runner.temp }}/codex-review-published-source.tar.gz
             ${{ runner.temp }}/trusted-codex-pr-review-verify.sh
-            ${{ runner.temp }}/trusted-check-codex-pr-safety.py
+            ${{ runner.temp }}/trusted-check-codex-pr-safety.rb
             ${{ runner.temp }}/trusted-codex-local-pipeline.sh
           if-no-files-found: error
           retention-days: 1
@@ -745,7 +745,7 @@ jobs:
         env:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
-          TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-check-codex-pr-safety.py
+          TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-check-codex-pr-safety.rb
         run: |
           set +e
           bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh" >"$RUNNER_TEMP/codex-review-external-repair-verification.log" 2>&1
@@ -819,7 +819,7 @@ jobs:
           persist-credentials: false
 
       - name: Enforce pull-request credential isolation
-        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.py --repository-root "$GITHUB_WORKSPACE"
+        run: ruby --disable-gems ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb --repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -1045,7 +1045,7 @@ jobs:
           test -z "$(git config --local --get-all credential.helper || true)"
           tar -czf "$RUNNER_TEMP/codex-review-source.tar.gz" .
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
-          cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.py "$RUNNER_TEMP/trusted-check-codex-pr-safety.py"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb "$RUNNER_TEMP/trusted-check-codex-pr-safety.rb"
           cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
 
       - name: Upload credential-free review source
@@ -1055,7 +1055,7 @@ jobs:
           path: |
             ${{ runner.temp }}/codex-review-source.tar.gz
             ${{ runner.temp }}/trusted-codex-pr-review-verify.sh
-            ${{ runner.temp }}/trusted-check-codex-pr-safety.py
+            ${{ runner.temp }}/trusted-check-codex-pr-safety.rb
             ${{ runner.temp }}/trusted-codex-local-pipeline.sh
           if-no-files-found: error
           retention-days: 1
@@ -1115,7 +1115,7 @@ jobs:
         env:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
-          TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-check-codex-pr-safety.py
+          TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-check-codex-pr-safety.rb
         run: |
           set +e
           bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh" >"$RUNNER_TEMP/codex-review-verification.log" 2>&1

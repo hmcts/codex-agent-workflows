@@ -80,6 +80,17 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertLess(dispatch, activation)
         self.assertIn("pin exactly the recorded release SHA", content)
 
+    def test_rollout_blocks_scheduler_api_until_pr_ci_is_credential_free(self):
+        content = ROLLOUT.read_text(encoding="utf-8")
+        prerequisite = content.index(
+            "Make `hmcts/juror-scheduler-api` PR verification credential-free"
+        )
+        activation = content.index("Enable the Jira dispatch rule")
+        self.assertLess(prerequisite, activation)
+        self.assertIn("Azure login and ACR authentication must be push-only", content)
+        self.assertIn("normal PR check and the shared Codex PR credential safety gate", content)
+        self.assertIn("intentionally fails closed for scheduler-api", content)
+
     def test_model_preflight_never_executes_repository_gradle_wrapper(self):
         content = PREFLIGHT.read_text(encoding="utf-8")
         self.assertNotIn("./gradlew", content)
@@ -143,7 +154,7 @@ class WorkflowContractTests(unittest.TestCase):
                 )
                 end = start + 3 + next_job.start() if next_job else len(content)
                 job = content[start:end]
-                gate = job.index("check-codex-pr-safety.py")
+                gate = job.index("check-codex-pr-safety.rb")
                 token = job.index("actions/create-github-app-token@")
                 self.assertLess(gate, token, f"late credential gate in {job_name}")
 
@@ -151,8 +162,15 @@ class WorkflowContractTests(unittest.TestCase):
         for name in ("codex-jira-verify.sh", "codex-pr-review-verify.sh"):
             content = (ROOT / "scripts" / name).read_text(encoding="utf-8")
             apply_patch = content.index('apply --index --binary "${patch_path}"')
-            safety_gate = content.index('run_sanitized python3 -I "${safety_gate_path}"')
+            safety_gate = content.index(
+                'run_sanitized ruby --disable-gems "${safety_gate_path}"'
+            )
             self.assertLess(apply_patch, safety_gate)
+
+    def test_review_verification_bundle_includes_structural_safety_checker(self):
+        content = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(content.count("trusted-check-codex-pr-safety.rb"), 6)
+        self.assertNotIn("trusted-check-codex-pr-safety.py", content)
 
     def test_jira_no_change_result_has_terminal_callback(self):
         content = IMPLEMENT_WORKFLOW.read_text(encoding="utf-8")

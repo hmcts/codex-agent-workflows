@@ -25,7 +25,7 @@ artifact_dir="${RUNNER_TEMP:-/tmp}/codex-jira-verify-${GITHUB_RUN_ID:-manual}-${
 sanitized_home="${artifact_dir}/sanitized-home"
 sanitized_tmp="${artifact_dir}/sanitized-tmp"
 trusted_pipeline_path="${artifact_dir}/trusted-codex-local-pipeline.sh"
-safety_gate_path="${TRUSTED_PR_SAFETY_PATH:-${CODEX_RUNTIME_PATH:-}/.github/scripts/check-codex-pr-safety.py}"
+safety_gate_path="${TRUSTED_PR_SAFETY_PATH:-${CODEX_RUNTIME_PATH:-}/.github/scripts/check-codex-pr-safety.rb}"
 trusted_pipeline_sha=""
 guardrail_review_required="false"
 guardrail_pathspecs=(
@@ -177,7 +177,7 @@ if [[ ! -f "${safety_gate_path}" || -L "${safety_gate_path}" ]]; then
   echo "Missing trusted PR credential safety gate: ${safety_gate_path}" >&2
   exit 1
 fi
-run_sanitized python3 -I "${safety_gate_path}" --repository-root .
+run_sanitized ruby --disable-gems "${safety_gate_path}" --repository-root .
 
 detect_guardrail_changes
 append_guardrail_warning
