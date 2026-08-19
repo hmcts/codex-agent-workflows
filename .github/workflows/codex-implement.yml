@@ -477,6 +477,28 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  codex-no-changes:
+    needs: codex-generate
+    if: always() && needs.codex-generate.outputs.has_changes == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@c9d374f423bea72f223b157fd54a96e5d53b207c
+
+      - name: Notify Jira that no repository changes are required
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --status no-changes \
+            --message "Codex completed the validated implementation plan and reported that no repository changes are required."
+
   verify-codex-output:
     needs: [codex-generate, prepare-codex-verification-source, validate-codex-plan]
     if: needs.codex-generate.outputs.has_changes == 'true'
@@ -484,7 +506,7 @@ jobs:
     timeout-minutes: 60
     permissions: {}
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       output_artifact: codex-jira-output
       verified_artifact: codex-jira-verified-0
       draft_artifact: codex-jira-unverified-0
@@ -735,7 +757,7 @@ jobs:
     timeout-minutes: 60
     permissions: {}
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       output_artifact: codex-jira-output-repair-1
       verified_artifact: codex-jira-verified-1
       draft_artifact: codex-jira-unverified-1
@@ -986,7 +1008,7 @@ jobs:
     timeout-minutes: 60
     permissions: {}
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       output_artifact: codex-jira-output-repair-2
       verified_artifact: codex-jira-verified-2
       draft_artifact: codex-jira-unverified-2
@@ -1237,7 +1259,7 @@ jobs:
     timeout-minutes: 60
     permissions: {}
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       output_artifact: codex-jira-output-repair-3
       verified_artifact: codex-jira-verified-3
       draft_artifact: codex-jira-unverified-3
@@ -1336,9 +1358,12 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  publish-draft-pr:
+  prepare-draft-publication:
     needs:
       - codex-generate
+      - repair-codex-output-1
+      - repair-codex-output-2
+      - repair-codex-output-3
       - prepare-codex-verification-source
       - verify-codex-output
       - verify-codex-output-1
@@ -1350,17 +1375,118 @@ jobs:
       needs.verify-codex-output.outputs.passed != 'true' &&
       needs.verify-codex-output-1.outputs.passed != 'true' &&
       needs.verify-codex-output-2.outputs.passed != 'true' &&
-      needs.verify-codex-output-3.outputs.passed != 'true' &&
-      (
-        needs.verify-codex-output.outputs.passed == 'false' ||
-        needs.verify-codex-output-1.outputs.passed == 'false' ||
-        needs.verify-codex-output-2.outputs.passed == 'false' ||
-        needs.verify-codex-output-3.outputs.passed == 'false'
-      )
+      needs.verify-codex-output-3.outputs.passed != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
+    outputs:
+      available: ${{ steps.outcome.outputs.available }}
+      output_artifact: ${{ steps.outcome.outputs.output_artifact }}
+      draft_artifact: codex-jira-terminal-draft
+      failure_artifact: codex-jira-terminal-verification-failure
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      EXPECTED_BRANCH_NAME: ${{ needs.codex-generate.outputs.branch_name }}
+      CODEX_OUTPUT_ARTIFACT: ${{ needs.repair-codex-output-3.outputs.has_changes == 'true' && 'codex-jira-output-repair-3' || needs.repair-codex-output-2.outputs.has_changes == 'true' && 'codex-jira-output-repair-2' || needs.repair-codex-output-1.outputs.has_changes == 'true' && 'codex-jira-output-repair-1' || 'codex-jira-output' }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@c9d374f423bea72f223b157fd54a96e5d53b207c
+
+      - name: Download credential-free verification source
+        id: source
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: codex-verification-source
+          path: ${{ runner.temp }}/codex-verification-source
+
+      - name: Restore credential-free verification source
+        id: restore
+        if: steps.source.outcome == 'success'
+        run: tar -xzf "$RUNNER_TEMP/codex-verification-source/codex-verification-source.tar.gz" -C "$GITHUB_WORKSPACE"
+
+      - name: Download latest collected Codex output
+        id: output
+        if: steps.restore.outcome == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Validate latest patch structure without repository execution
+        id: structure
+        if: steps.output.outcome == 'success'
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          SKIP_LOCAL_PIPELINE: "true"
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-verify.sh
+
+      - name: Upload structurally valid output for draft publication
+        id: draft
+        if: steps.structure.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-jira-terminal-draft
+          path: |
+            ${{ runner.temp }}/codex-output/codex-pr-body.md
+            ${{ runner.temp }}/codex-output/guardrail-changes.txt
+            ${{ runner.temp }}/codex-output/verification.env
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Record terminal recovery outcome
+        id: outcome
+        if: always()
+        env:
+          DRAFT_OUTCOME: ${{ steps.draft.outcome }}
+          SOURCE_OUTCOME: ${{ steps.source.outcome }}
+          RESTORE_OUTCOME: ${{ steps.restore.outcome }}
+          OUTPUT_OUTCOME: ${{ steps.output.outcome }}
+          STRUCTURE_OUTCOME: ${{ steps.structure.outcome }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/codex-terminal-verification-failure"
+          {
+            echo "Credential-free verification did not complete successfully after the available repair attempts."
+            echo "Source artifact: ${SOURCE_OUTCOME}"
+            echo "Source restore: ${RESTORE_OUTCOME}"
+            echo "Patch artifact: ${OUTPUT_OUTCOME}"
+            echo "Structural validation: ${STRUCTURE_OUTCOME}"
+          } >"$RUNNER_TEMP/codex-terminal-verification-failure/verification-failure-summary.log"
+          cp "$RUNNER_TEMP/codex-terminal-verification-failure/verification-failure-summary.log" \
+            "$RUNNER_TEMP/codex-terminal-verification-failure/verification-failure.log"
+          echo "output_artifact=${CODEX_OUTPUT_ARTIFACT}" >>"$GITHUB_OUTPUT"
+          if [[ "${DRAFT_OUTCOME}" == "success" ]]; then
+            echo "available=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "available=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload terminal verification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-jira-terminal-verification-failure
+          path: ${{ runner.temp }}/codex-terminal-verification-failure
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-draft-pr:
+    needs:
+      - codex-generate
+      - prepare-codex-verification-source
+      - prepare-draft-publication
+    if: always() && needs.prepare-draft-publication.outputs.available == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
+    outputs:
+      branch_name: ${{ steps.state.outputs.branch_name || steps.publish.outputs.branch_name }}
+      commit_sha: ${{ steps.state.outputs.commit_sha || steps.publish.outputs.commit_sha }}
+      pr_url: ${{ steps.state.outputs.pr_url || steps.publish.outputs.pr_url }}
+      pr_number: ${{ steps.state.outputs.pr_number || steps.publish.outputs.pr_number }}
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       ISSUE_KEY: ${{ inputs.issueKey }}
@@ -1370,9 +1496,9 @@ jobs:
       EXPECTED_BASE_SHA: ${{ needs.prepare-codex-verification-source.outputs.source_sha }}
       JIRA_PUBLISH_MODE: initial
       PR_DRAFT: "true"
-      CODEX_OUTPUT_ARTIFACT: ${{ needs.verify-codex-output-3.outputs.passed == 'false' && needs.verify-codex-output-3.outputs.output_artifact || needs.verify-codex-output-2.outputs.passed == 'false' && needs.verify-codex-output-2.outputs.output_artifact || needs.verify-codex-output-1.outputs.passed == 'false' && needs.verify-codex-output-1.outputs.output_artifact || needs.verify-codex-output.outputs.output_artifact }}
-      CODEX_DRAFT_ARTIFACT: ${{ needs.verify-codex-output-3.outputs.passed == 'false' && needs.verify-codex-output-3.outputs.draft_artifact || needs.verify-codex-output-2.outputs.passed == 'false' && needs.verify-codex-output-2.outputs.draft_artifact || needs.verify-codex-output-1.outputs.passed == 'false' && needs.verify-codex-output-1.outputs.draft_artifact || needs.verify-codex-output.outputs.draft_artifact }}
-      CODEX_FAILURE_ARTIFACT: ${{ needs.verify-codex-output-3.outputs.passed == 'false' && needs.verify-codex-output-3.outputs.failure_artifact || needs.verify-codex-output-2.outputs.passed == 'false' && needs.verify-codex-output-2.outputs.failure_artifact || needs.verify-codex-output-1.outputs.passed == 'false' && needs.verify-codex-output-1.outputs.failure_artifact || needs.verify-codex-output.outputs.failure_artifact }}
+      CODEX_OUTPUT_ARTIFACT: ${{ needs.prepare-draft-publication.outputs.output_artifact }}
+      CODEX_DRAFT_ARTIFACT: ${{ needs.prepare-draft-publication.outputs.draft_artifact }}
+      CODEX_FAILURE_ARTIFACT: ${{ needs.prepare-draft-publication.outputs.failure_artifact }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
       CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
 
@@ -1450,6 +1576,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/codex-jira-publish.sh"
 
       - name: Publish draft pull request and notify Jira
+        id: publish
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BOT_PUBLISHER_LOGIN: ${{ steps.publisher.outputs.publisher_login }}
@@ -1457,6 +1584,36 @@ jobs:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           VERIFICATION_DIR: ${{ runner.temp }}/codex-unverified
         run: "$RUNNER_TEMP/codex-jira-publish.sh"
+
+      - name: Recover draft pull request state
+        id: state
+        if: always() && steps.publish.outputs.commit_sha != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH_NAME: ${{ steps.publish.outputs.branch_name }}
+          COMMIT_SHA: ${{ steps.publish.outputs.commit_sha }}
+        run: |
+          pr_json="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "${BRANCH_NAME}" --state open --json number,url,headRefOid --jq '.[0]')"
+          test "$(jq -r '.headRefOid // empty' <<<"${pr_json}")" = "${COMMIT_SHA}"
+          echo "branch_name=${BRANCH_NAME}" >>"$GITHUB_OUTPUT"
+          echo "commit_sha=${COMMIT_SHA}" >>"$GITHUB_OUTPUT"
+          echo "pr_url=$(jq -r .url <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
+          echo "pr_number=$(jq -r .number <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
+
+      - name: Retry Jira callback after partial draft publication
+        if: always() && steps.publish.outcome == 'failure' && steps.state.outcome == 'success'
+        continue-on-error: true
+        env:
+          BRANCH_NAME: ${{ steps.state.outputs.branch_name }}
+          COMMIT_SHA: ${{ steps.state.outputs.commit_sha }}
+          PR_URL: ${{ steps.state.outputs.pr_url }}
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --pr-url "${PR_URL}" \
+            --branch-name "${BRANCH_NAME}" \
+            --commit-sha "${COMMIT_SHA}" \
+            --draft true \
+            --verification-status failed
 
   publish-pr:
     needs:
@@ -1480,10 +1637,10 @@ jobs:
     permissions:
       contents: read
     outputs:
-      branch_name: ${{ steps.publish.outputs.branch_name }}
-      commit_sha: ${{ steps.publish.outputs.commit_sha }}
-      pr_url: ${{ steps.publish.outputs.pr_url }}
-      pr_number: ${{ steps.publish.outputs.pr_number }}
+      branch_name: ${{ steps.state.outputs.branch_name || steps.publish.outputs.branch_name }}
+      commit_sha: ${{ steps.state.outputs.commit_sha || steps.publish.outputs.commit_sha }}
+      pr_url: ${{ steps.state.outputs.pr_url || steps.publish.outputs.pr_url }}
+      pr_number: ${{ steps.state.outputs.pr_number || steps.publish.outputs.pr_number }}
       output_artifact: ${{ steps.selected-artifacts.outputs.output_artifact }}
       verified_artifact: ${{ steps.selected-artifacts.outputs.verified_artifact }}
     env:
@@ -1564,6 +1721,36 @@ jobs:
           VERIFICATION_DIR: ${{ runner.temp }}/codex-verified
         run: "$RUNNER_TEMP/codex-jira-publish.sh"
 
+      - name: Recover published pull request state
+        id: state
+        if: always() && steps.publish.outputs.commit_sha != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH_NAME: ${{ steps.publish.outputs.branch_name }}
+          COMMIT_SHA: ${{ steps.publish.outputs.commit_sha }}
+        run: |
+          pr_json="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "${BRANCH_NAME}" --state open --json number,url,headRefOid --jq '.[0]')"
+          test "$(jq -r '.headRefOid // empty' <<<"${pr_json}")" = "${COMMIT_SHA}"
+          echo "branch_name=${BRANCH_NAME}" >>"$GITHUB_OUTPUT"
+          echo "commit_sha=${COMMIT_SHA}" >>"$GITHUB_OUTPUT"
+          echo "pr_url=$(jq -r .url <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
+          echo "pr_number=$(jq -r .number <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
+
+      - name: Retry Jira callback after partial publication
+        if: always() && steps.publish.outcome == 'failure' && steps.state.outcome == 'success'
+        continue-on-error: true
+        env:
+          BRANCH_NAME: ${{ steps.state.outputs.branch_name }}
+          COMMIT_SHA: ${{ steps.state.outputs.commit_sha }}
+          PR_URL: ${{ steps.state.outputs.pr_url }}
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --pr-url "${PR_URL}" \
+            --branch-name "${BRANCH_NAME}" \
+            --commit-sha "${COMMIT_SHA}" \
+            --draft false \
+            --verification-status passed
+
       - name: Write workflow summary
         if: always()
         run: |
@@ -1582,7 +1769,7 @@ jobs:
     timeout-minutes: 60
     permissions: {}
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       output_artifact: ${{ steps.selected-artifacts.outputs.output_artifact }}
       failure_artifact: ${{ steps.selected-artifacts.outputs.failure_artifact }}
     env:
@@ -1667,7 +1854,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       output_artifact: ${{ needs.verify-published-pr-patch.outputs.output_artifact }}
       failure_artifact: ${{ steps.verify.outputs.failure_artifact }}
     env:
@@ -1886,7 +2073,7 @@ jobs:
     timeout-minutes: 60
     permissions: {}
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       output_artifact: ${{ steps.selected-artifacts.outputs.output_artifact }}
       verified_artifact: ${{ steps.selected-artifacts.outputs.verified_artifact }}
       failure_artifact: ${{ steps.selected-artifacts.outputs.failure_artifact }}
@@ -1986,10 +2173,10 @@ jobs:
     permissions:
       contents: read
     outputs:
-      branch_name: ${{ steps.publish.outputs.branch_name }}
-      commit_sha: ${{ steps.publish.outputs.commit_sha }}
-      pr_url: ${{ steps.publish.outputs.pr_url }}
-      pr_number: ${{ steps.publish.outputs.pr_number }}
+      branch_name: ${{ steps.state.outputs.branch_name || steps.publish.outputs.branch_name }}
+      commit_sha: ${{ steps.state.outputs.commit_sha || steps.publish.outputs.commit_sha }}
+      pr_url: ${{ steps.state.outputs.pr_url || steps.publish.outputs.pr_url }}
+      pr_number: ${{ steps.state.outputs.pr_number || steps.publish.outputs.pr_number }}
       output_artifact: ${{ steps.selected-artifacts.outputs.output_artifact }}
       verified_artifact: ${{ steps.selected-artifacts.outputs.verified_artifact }}
     env:
@@ -2071,6 +2258,36 @@ jobs:
           VERIFICATION_DIR: ${{ runner.temp }}/codex-verified
         run: "$RUNNER_TEMP/codex-jira-publish.sh"
 
+      - name: Recover repaired pull request state
+        id: state
+        if: always() && steps.publish.outputs.commit_sha != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH_NAME: ${{ steps.publish.outputs.branch_name }}
+          COMMIT_SHA: ${{ steps.publish.outputs.commit_sha }}
+        run: |
+          pr_json="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "${BRANCH_NAME}" --state open --json number,url,headRefOid --jq '.[0]')"
+          test "$(jq -r '.headRefOid // empty' <<<"${pr_json}")" = "${COMMIT_SHA}"
+          echo "branch_name=${BRANCH_NAME}" >>"$GITHUB_OUTPUT"
+          echo "commit_sha=${COMMIT_SHA}" >>"$GITHUB_OUTPUT"
+          echo "pr_url=$(jq -r .url <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
+          echo "pr_number=$(jq -r .number <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
+
+      - name: Retry Jira callback after partial repair publication
+        if: always() && steps.publish.outcome == 'failure' && steps.state.outcome == 'success'
+        continue-on-error: true
+        env:
+          BRANCH_NAME: ${{ steps.state.outputs.branch_name }}
+          COMMIT_SHA: ${{ steps.state.outputs.commit_sha }}
+          PR_URL: ${{ steps.state.outputs.pr_url }}
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --pr-url "${PR_URL}" \
+            --branch-name "${BRANCH_NAME}" \
+            --commit-sha "${COMMIT_SHA}" \
+            --draft false \
+            --verification-status passed
+
   verify-published-pr-1-patch:
     needs: [publish-published-pr-repair-1, prepare-codex-verification-source, validate-codex-plan]
     if: always() && needs.publish-published-pr-repair-1.outputs.pr_number != ''
@@ -2078,7 +2295,7 @@ jobs:
     timeout-minutes: 60
     permissions: {}
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       failure_artifact: codex-jira-pr-repair-patch-failure-1
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -2156,7 +2373,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       failure_artifact: ${{ steps.verify.outputs.failure_artifact }}
     env:
       GH_TOKEN: ${{ github.token }}
@@ -2274,6 +2491,7 @@ jobs:
         run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
 
       - name: Download final verification failure
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           name: ${{ env.FAILURE_ARTIFACT }}
@@ -2314,4 +2532,42 @@ jobs:
       - name: Fail after repair attempts
         run: |
           echo "Codex verification failed after 3 repair attempt(s)."
+          exit 1
+
+  codex-prepublication-terminal-failed:
+    needs:
+      - codex-generate
+      - prepare-draft-publication
+      - publish-draft-pr
+      - publish-pr
+    if: |
+      always() &&
+      needs.codex-generate.outputs.has_changes == 'true' &&
+      needs.publish-draft-pr.outputs.pr_number == '' &&
+      needs.publish-pr.outputs.pr_number == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@c9d374f423bea72f223b157fd54a96e5d53b207c
+
+      - name: Notify Jira that no patch could be published
+        continue-on-error: true
+        env:
+          RECOVERY_AVAILABLE: ${{ needs.prepare-draft-publication.outputs.available }}
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --status failed \
+            --message "Credential-free verification or publication infrastructure failed before a pull request could be published. Structurally valid draft available: ${RECOVERY_AVAILABLE}. See the workflow run for details."
+
+      - name: Stop workflow after terminal pre-publication failure
+        run: |
+          echo "::error title=Codex publication failed::No verified or draft pull request was published; a terminal Jira callback was attempted."
           exit 1

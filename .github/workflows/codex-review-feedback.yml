@@ -308,7 +308,10 @@ jobs:
 
   codex-review-publish:
     needs: [detect-codex-pr, codex-review-generate-action, codex-review-generate, codex-review-verify]
-    if: needs.detect-codex-pr.outputs.is_codex_pr == 'true'
+    if: |
+      always() &&
+      needs.detect-codex-pr.outputs.is_codex_pr == 'true' &&
+      needs.codex-review-verify.outputs.passed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -403,7 +406,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       failure_artifact: codex-review-external-status-failure
     env:
       GH_TOKEN: ${{ github.token }}
@@ -684,7 +687,7 @@ jobs:
     timeout-minutes: 60
     permissions: {}
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       output_artifact: codex-review-output-external-repair-1
       verified_artifact: codex-review-verified-external-repair-1
       failure_artifact: codex-review-external-repair-verification-failure-1
@@ -865,7 +868,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      passed: ${{ steps.verify.outputs.passed }}
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
       failure_artifact: codex-review-external-status-failure-repair-1
     env:
       GH_TOKEN: ${{ github.token }}
@@ -969,6 +972,7 @@ jobs:
         run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
 
       - name: Download final verification failure
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           name: ${{ env.FAILURE_ARTIFACT }}
@@ -1051,6 +1055,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {}
     timeout-minutes: 60
+    outputs:
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
+      failure_artifact: codex-review-verification-failure
     env:
       EXPECTED_PR_NUMBER: ${{ needs.detect-codex-pr.outputs.pr_number }}
       EXPECTED_HEAD_REF: ${{ needs.detect-codex-pr.outputs.head_ref }}
@@ -1097,9 +1104,23 @@ jobs:
         env:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
-        run: bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh"
+        run: |
+          set +e
+          bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh" >"$RUNNER_TEMP/codex-review-verification.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/codex-review-verification.log"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            mkdir -p "$RUNNER_TEMP/codex-review-verification-failure"
+            cp "$RUNNER_TEMP/codex-review-verification.log" "$RUNNER_TEMP/codex-review-verification-failure/verification-failure.log"
+            tail -n 240 "$RUNNER_TEMP/codex-review-verification.log" >"$RUNNER_TEMP/codex-review-verification-failure/verification-failure-summary.log"
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+          exit 0
 
       - name: Upload verified Codex review output
+        if: steps.verify.outputs.passed == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: codex-review-verified
@@ -1109,3 +1130,78 @@ jobs:
             ${{ runner.temp }}/codex-output/verification.env
           if-no-files-found: error
           retention-days: 1
+
+      - name: Upload review verification failure
+        if: steps.verify.outputs.passed == 'false'
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-review-verification-failure
+          path: ${{ runner.temp }}/codex-review-verification-failure
+          if-no-files-found: error
+          retention-days: 1
+
+  codex-review-prepublication-verification-failed:
+    needs:
+      - detect-codex-pr
+      - codex-review-generate-action
+      - codex-review-verify
+      - codex-review-publish
+    if: |
+      always() &&
+      needs.detect-codex-pr.outputs.is_codex_pr == 'true' &&
+      needs.codex-review-generate-action.outputs.should_run == 'true' &&
+      needs.codex-review-verify.outputs.passed != 'true' &&
+      needs.codex-review-publish.outputs.commit_sha == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      PR_NUMBER: ${{ needs.detect-codex-pr.outputs.pr_number }}
+      EXPECTED_HEAD_SHA: ${{ needs.codex-review-generate-action.outputs.head_sha }}
+      FAILURE_MESSAGE: Credential-free review-feedback verification failed before the generated patch could be published.
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@c9d374f423bea72f223b157fd54a96e5d53b207c
+
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ inputs.github_app_client_id }}
+          private-key: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Verify GitHub App publisher
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GITHUB_APP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
+
+      - name: Download review verification failure
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.codex-review-verify.outputs.failure_artifact }}
+          path: ${{ runner.temp }}/codex-review-terminal-failure
+
+      - name: Return pull request to draft and notify Jira
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          FAILURE_DIR: ${{ runner.temp }}/codex-review-terminal-failure
+          NOTIFY_JIRA: "true"
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-mark-pr-failed.sh
+
+      - name: Fail after pre-publication verification failure
+        run: |
+          echo "Review-feedback verification failed before publication; the pull request was returned to draft."
+          exit 1

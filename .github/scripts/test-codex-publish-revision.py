@@ -27,6 +27,7 @@ class PublisherRevisionTest(unittest.TestCase):
         *,
         remote_base: str | Sequence[str],
         remote_head: str | Sequence[str],
+        fail_pr_comment: bool = False,
     ) -> tuple[Path, Path]:
         fake_bin = root / "bin"
         fake_bin.mkdir()
@@ -98,11 +99,16 @@ fi
 
         fake_gh = fake_bin / "gh"
         fake_gh.write_text(
-            """#!/usr/bin/env bash
+            f"""#!/usr/bin/env bash
 set -euo pipefail
 case "$*" in
   *"pr list"*) echo "https://example.invalid/pull/42" ;;
   *"pr view"*) echo "42" ;;
+  *"pr comment"*)
+    if [[ {str(fail_pr_comment).lower()!r} == "true" ]]; then
+      exit 23
+    fi
+    ;;
 esac
 """,
             encoding="utf-8",
@@ -320,7 +326,12 @@ esac
 
         return output, verified
 
-    def run_review(self, remote_head: str) -> tuple[subprocess.CompletedProcess[str], str]:
+    def run_review_with_outputs(
+        self,
+        remote_head: str,
+        *,
+        fail_pr_comment: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str], str, str]:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             output, verified = self.write_patch_artifacts(root, kind="review")
@@ -328,7 +339,9 @@ esac
                 root,
                 remote_base=BASE_SHA,
                 remote_head=remote_head,
+                fail_pr_comment=fail_pr_comment,
             )
+            github_output = root / "github-output"
             completed = subprocess.run(
                 ["bash", str(REVIEW_PUBLISHER)],
                 cwd=SCRIPT_DIR.parent.parent,
@@ -345,20 +358,27 @@ esac
                     "EXPECTED_HEAD_REF": "codex/example",
                     "EXPECTED_HEAD_SHA": HEAD_SHA,
                     "RUNNER_TEMP": str(root / "runner"),
+                    "GITHUB_OUTPUT": str(github_output),
                 },
                 capture_output=True,
                 text=True,
             )
             commands = command_log.read_text(encoding="utf-8") if command_log.exists() else ""
-            return completed, commands
+            outputs = github_output.read_text(encoding="utf-8") if github_output.exists() else ""
+            return completed, commands, outputs
 
-    def run_jira(
+    def run_review(self, remote_head: str) -> tuple[subprocess.CompletedProcess[str], str]:
+        completed, commands, _ = self.run_review_with_outputs(remote_head)
+        return completed, commands
+
+    def run_jira_with_outputs(
         self,
         *,
         mode: str,
         remote_base: str | Sequence[str] = BASE_SHA,
         remote_head: str | Sequence[str] = "",
-    ) -> tuple[subprocess.CompletedProcess[str], str]:
+        fail_notify: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str], str, str]:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             caller = root / "minimal-caller"
@@ -369,6 +389,7 @@ esac
                 remote_base=remote_base,
                 remote_head=remote_head,
             )
+            github_output = root / "github-output"
             env = {
                 **os.environ,
                 "PATH": f"{fake_bin}:{os.environ['PATH']}",
@@ -388,7 +409,11 @@ esac
                 "DEFAULT_BRANCH": "master",
                 "CODEX_RUNTIME_PATH": str(SCRIPT_DIR.parent.parent),
                 "RUNNER_TEMP": str(root / "runner"),
+                "GITHUB_OUTPUT": str(github_output),
             }
+            if fail_notify:
+                env["CODEX_JIRA_PR_NOTIFY_URL"] = "http://127.0.0.1:1/notify"
+                env["CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS"] = "1"
             if mode == "repair":
                 env["EXPECTED_BRANCH_HEAD_SHA"] = HEAD_SHA
             completed = subprocess.run(
@@ -399,7 +424,22 @@ esac
                 text=True,
             )
             commands = command_log.read_text(encoding="utf-8") if command_log.exists() else ""
-            return completed, commands
+            outputs = github_output.read_text(encoding="utf-8") if github_output.exists() else ""
+            return completed, commands, outputs
+
+    def run_jira(
+        self,
+        *,
+        mode: str,
+        remote_base: str | Sequence[str] = BASE_SHA,
+        remote_head: str | Sequence[str] = "",
+    ) -> tuple[subprocess.CompletedProcess[str], str]:
+        completed, commands, _ = self.run_jira_with_outputs(
+            mode=mode,
+            remote_base=remote_base,
+            remote_head=remote_head,
+        )
+        return completed, commands
 
     def test_jira_publisher_loads_notifier_from_shared_runtime(self) -> None:
         completed, _ = self.run_jira(mode="initial")
@@ -408,6 +448,31 @@ esac
     def test_review_publisher_accepts_exact_verified_head(self) -> None:
         completed, _ = self.run_review(HEAD_SHA)
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_review_publisher_persists_push_outputs_before_comment_failure(self) -> None:
+        completed, commands, outputs = self.run_review_with_outputs(
+            HEAD_SHA,
+            fail_pr_comment=True,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assert_command_logged(commands, "push")
+        self.assertIn("pr_number=42\n", outputs)
+        self.assertIn("branch_name=codex/example\n", outputs)
+        self.assertIn(f"commit_sha={NEW_SHA}\n", outputs)
+
+    def test_jira_publisher_persists_pr_outputs_before_notify_failure(self) -> None:
+        completed, commands, outputs = self.run_jira_with_outputs(
+            mode="initial",
+            fail_notify=True,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assert_command_logged(commands, "push")
+        self.assertIn("branch_name=codex/example\n", outputs)
+        self.assertIn(f"commit_sha={NEW_SHA}\n", outputs)
+        self.assertIn("pr_url=https://example.invalid/pull/42\n", outputs)
+        self.assertIn("pr_number=42\n", outputs)
 
     def test_publication_code_does_not_dispatch_pr_tasks(self) -> None:
         publication_paths = [JIRA_PUBLISHER, REVIEW_PUBLISHER]

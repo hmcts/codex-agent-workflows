@@ -23,11 +23,6 @@ node --version
 npm --version
 python3 --version
 codex --version
-if [[ -x ./gradlew ]]; then
-  ./gradlew --version
-else
-  echo "No Gradle wrapper in this repository; skipping Gradle preflight."
-fi
 
 if command -v docker >/dev/null 2>&1; then
   docker --version

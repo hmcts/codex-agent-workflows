@@ -22,13 +22,53 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=.github/scripts/codex-action-runtime.sh
 source "${script_dir}/codex-action-runtime.sh"
 
+case "${CODEX_OPERATION}" in
+  jira-generate)
+    ;;
+  jira-repair)
+    required_env "INPUT_DIR"
+    required_env "REPAIR_ATTEMPT"
+    ;;
+  *)
+    echo "Unsupported Codex Jira operation: ${CODEX_OPERATION}" >&2
+    exit 1
+    ;;
+esac
+
 mkdir -p "${output_dir}"
 validated_codex_plan_path "${PLAN_DIR}" >/dev/null
 allowed_paths_file="${PLAN_DIR}/allowed-paths.txt"
-ALLOWED_PATHS_FILE="${allowed_paths_file}" REQUIRE_CHANGES=true WRITE_PR_DETAIL_FILES=true \
+ALLOWED_PATHS_FILE="${allowed_paths_file}" REQUIRE_CHANGES=false WRITE_PR_DETAIL_FILES=true \
   python3 "${script_dir}/collect-codex-patch-result.py"
 summary_path="${output_dir}/codex-summary.txt"
 testing_path="${output_dir}/codex-testing.txt"
+has_changes="$(awk -F= '$1 == "has_changes" { print $2; exit }' "${output_dir}/codex-result.env")"
+
+if [[ "${has_changes}" == "false" ]]; then
+  rm -f \
+    "${output_dir}/codex-final-message.md" \
+    "${summary_path}" \
+    "${testing_path}"
+  {
+    echo "branch_name=${BRANCH_NAME}"
+    echo "has_changes=false"
+    if [[ "${CODEX_OPERATION}" == "jira-repair" ]]; then
+      echo "repair_attempt=${REPAIR_ATTEMPT}"
+    fi
+  } >"${metadata_path}"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    {
+      echo "branch_name=${BRANCH_NAME}"
+      echo "has_changes=false"
+    } >>"${GITHUB_OUTPUT}"
+  fi
+  exit 0
+fi
+
+if [[ "${has_changes}" != "true" ]]; then
+  echo "Unexpected Codex has_changes value: ${has_changes}" >&2
+  exit 1
+fi
 
 case "${CODEX_OPERATION}" in
   jira-generate)
@@ -143,8 +183,6 @@ Path(os.environ["PR_BODY_PATH"]).write_text(body, encoding="utf-8")
 PY
     ;;
   jira-repair)
-    required_env "INPUT_DIR"
-    required_env "REPAIR_ATTEMPT"
     input_pr_body_path="${INPUT_DIR}/codex-pr-body.md"
     if [[ -s "${input_pr_body_path}" ]]; then
       cp "${input_pr_body_path}" "${pr_body_path}"
@@ -198,10 +236,6 @@ with pr_body_path.open("a", encoding="utf-8") as body:
         f"#### Testing details\n\n{testing}\n"
     )
 PY
-    ;;
-  *)
-    echo "Unsupported Codex Jira operation: ${CODEX_OPERATION}" >&2
-    exit 1
     ;;
 esac
 

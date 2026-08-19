@@ -95,11 +95,22 @@ class CodexPlanHandoffTest(unittest.TestCase):
             }
         )
 
+    @staticmethod
+    def no_change_result() -> str:
+        return json.dumps(
+            {
+                "has_changes": False,
+                "patch_gzip_base64": "",
+                "summary": "The repository already satisfies the validated plan.",
+                "testing": "Inspected the planned files.",
+            }
+        )
+
     def run_collector(
         self,
         plan_dir: Path,
         operation: str,
-        patch: str,
+        patch: str | None,
         *,
         initiator_display_name: str = "Zac *Healy*",
         existing_pr_body: bool = True,
@@ -115,7 +126,11 @@ class CodexPlanHandoffTest(unittest.TestCase):
             )
         environment = {
             **os.environ,
-            "CODEX_RESULT": self.codex_result(patch),
+            "CODEX_RESULT": (
+                self.codex_result(patch)
+                if patch is not None
+                else self.no_change_result()
+            ),
             "CODEX_OPERATION": operation,
             "OUTPUT_DIR": str(output_dir),
             "BRANCH_NAME": "codex/test-plan",
@@ -136,6 +151,18 @@ class CodexPlanHandoffTest(unittest.TestCase):
             check=False,
         )
         return completed, output_dir
+
+    def test_generation_collector_accepts_trusted_no_change_result(self) -> None:
+        plan_dir = self.make_plan()
+        completed, output_dir = self.run_collector(plan_dir, "jira-generate", None)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            (output_dir / "metadata.env").read_text(encoding="utf-8"),
+            "branch_name=codex/test-plan\nhas_changes=false\n",
+        )
+        self.assertFalse((output_dir / "changes.patch").exists())
+        self.assertFalse((output_dir / "codex-pr-body.md").exists())
 
     def test_accepts_matching_plan_hash_and_paths(self) -> None:
         plan_dir = self.make_plan()

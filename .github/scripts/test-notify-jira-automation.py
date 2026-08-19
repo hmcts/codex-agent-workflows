@@ -64,6 +64,22 @@ class NotifyJiraAutomationTest(unittest.TestCase):
         self.assertEqual(payload["runUrl"], "https://github.com/hmcts/juror-api/actions/runs/456")
         self.assertNotIn("prUrl", payload)
 
+    def test_builds_terminal_no_changes_payload(self):
+        args = argparse.Namespace(
+            pr_url=None,
+            status="no-changes",
+            branch_name=None,
+            commit_sha=None,
+            draft=False,
+            verification_status="passed",
+            message="No repository changes are required.",
+        )
+        with self.environment():
+            payload = MODULE.build_payload(args)
+        self.assertEqual(payload["status"], "no-changes")
+        self.assertEqual(payload["message"], "No repository changes are required.")
+        self.assertNotIn("prUrl", payload)
+
     def test_rejects_incomplete_mode_arguments(self):
         args = argparse.Namespace(
             pr_url=None,
