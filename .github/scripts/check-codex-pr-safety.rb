@@ -2,16 +2,84 @@
 # frozen_string_literal: true
 
 require "psych"
+require "set"
 require "yaml"
 
-PR_EVENTS = %w[pull_request pull_request_target].freeze
 PUSH_FILTERS = %w[branches branches-ignore paths paths-ignore tags tags-ignore].freeze
+WORKFLOW_RUN_FILTERS = %w[workflows types branches branches-ignore].freeze
+BRANCH_REVISION_EVENTS = %w[pull_request create].freeze
+OPAQUE_REVISION_EVENTS = %w[
+  pull_request_target
+  pull_request_review
+  pull_request_review_comment
+  pull_request_review_thread
+  issue_comment
+  merge_group
+  commit_comment
+  check_run
+  check_suite
+  status
+].freeze
+PROTECTED_EVENT_FILTERS = {
+  "pull_request" => %w[types branches branches-ignore paths paths-ignore],
+  "pull_request_target" => %w[types branches branches-ignore paths paths-ignore],
+  "pull_request_review" => %w[types],
+  "pull_request_review_comment" => %w[types],
+  "pull_request_review_thread" => %w[types],
+  "issue_comment" => %w[types],
+  "merge_group" => %w[types branches branches-ignore],
+  "commit_comment" => %w[types],
+  "check_run" => %w[types],
+  "check_suite" => %w[types],
+  "create" => [],
+  "status" => [],
+}.freeze
+TRUSTED_REVIEW_EVENTS = {
+  "pull_request_review" => ["submitted"],
+  "pull_request_review_comment" => ["created"],
+  "issue_comment" => ["created"],
+}.freeze
+TRUSTED_REVIEW_INPUTS = %w[
+  runner_label
+  node_version
+  github_app_client_id
+  sonar_host_url
+  sonar_project_key
+  required_status_context
+  required_status_poll_seconds
+  required_status_timeout_seconds
+  jira_notify_timeout_seconds
+].freeze
+REQUIRED_TRUSTED_REVIEW_INPUTS = %w[
+  runner_label
+  github_app_client_id
+  sonar_host_url
+  sonar_project_key
+].freeze
+TRUSTED_REVIEW_SECRETS = %w[
+  CODEX_OPENAI_API_KEY
+  CODEX_GITHUB_APP_PRIVATE_KEY
+  CODEX_JIRA_PR_NOTIFY_URL
+  CODEX_SONAR_TOKEN
+].freeze
+TRUSTED_REVIEW_PREFIX = "hmcts/codex-agent-workflows/.github/workflows/codex-review-feedback.yml@"
+TRUSTED_REVIEW_REFERENCE = %r{\Ahmcts/codex-agent-workflows/\.github/workflows/codex-review-feedback\.yml@[0-9a-f]{40}\z}.freeze
 SECRET_EXPRESSION = /\$\{\{.*?\bsecrets\b.*?\}\}/im.freeze
 GITHUB_EXPRESSION = /\$\{\{/.freeze
 GLOB_MAGIC = /[*?\[\]{}+@]/.freeze
 LOCAL_WORKFLOW = %r{\A\./\.github/workflows/([^/]+\.ya?ml)\z}.freeze
+STATIC_VAR_EXPRESSION = /\A\$\{\{\s*vars\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}\z/.freeze
 
 WorkflowEntry = Struct.new(:relative_path, :absolute_path, :workflow, keyword_init: true)
+WorkflowRunConfig = Struct.new(:upstream_names, :branch_taint_reachable, keyword_init: true)
+WorkflowAnalysis = Struct.new(
+  :entry,
+  :events,
+  :exposures,
+  :workflow_run,
+  :upstreams,
+  keyword_init: true
+)
 
 class WorkflowSafetyError < StandardError; end
 
@@ -146,19 +214,19 @@ def trigger_events(trigger)
   end
 end
 
-def filter_patterns(configuration, key)
+def static_patterns(configuration, key, location)
   return nil unless configuration.key?(key)
 
   patterns = configuration[key]
   unless patterns.is_a?(Array) && !patterns.empty?
-    raise WorkflowSafetyError, "on.push.#{key} must be a non-empty sequence"
+    raise WorkflowSafetyError, "#{location}.#{key} must be a non-empty sequence"
   end
   patterns.map.with_index do |pattern, index|
     unless pattern.is_a?(String) && !pattern.empty?
-      raise WorkflowSafetyError, "on.push.#{key}[#{index}] must be a non-empty string"
+      raise WorkflowSafetyError, "#{location}.#{key}[#{index}] must be a non-empty string"
     end
     if pattern.match?(GITHUB_EXPRESSION) || pattern.include?("\\")
-      raise WorkflowSafetyError, "on.push.#{key}[#{index}] is dynamic or ambiguous"
+      raise WorkflowSafetyError, "#{location}.#{key}[#{index}] is dynamic or ambiguous"
     end
     pattern
   end
@@ -176,7 +244,7 @@ def excludes_every_generated_branch?(pattern)
   %w[** codex/**].include?(pattern)
 end
 
-def branches_may_match_generated?(patterns)
+def branches_may_match_generated?(patterns, location)
   may_match = false
   saw_positive = false
 
@@ -184,7 +252,7 @@ def branches_may_match_generated?(patterns)
     negative = pattern.start_with?("!")
     body = negative ? pattern[1..] : pattern
     if body.empty? || body.include?("!")
-      raise WorkflowSafetyError, "on.push.branches[#{index}] has ambiguous negation"
+      raise WorkflowSafetyError, "#{location}[#{index}] has ambiguous negation"
     end
 
     if negative
@@ -196,9 +264,29 @@ def branches_may_match_generated?(patterns)
   end
 
   unless saw_positive
-    raise WorkflowSafetyError, "on.push.branches must contain at least one positive pattern"
+    raise WorkflowSafetyError, "#{location} must contain at least one positive pattern"
   end
   may_match
+end
+
+def branch_filters_may_match_generated?(configuration, location)
+  branches = static_patterns(configuration, "branches", location)
+  branches_ignore = static_patterns(configuration, "branches-ignore", location)
+  if branches && branches_ignore
+    raise WorkflowSafetyError, "#{location} cannot combine branches and branches-ignore"
+  end
+
+  return branches_may_match_generated?(branches, "#{location}.branches") if branches
+  if branches_ignore
+    branches_ignore.each.with_index do |pattern, index|
+      if pattern.start_with?("!") || pattern.include?("!")
+        raise WorkflowSafetyError, "#{location}.branches-ignore[#{index}] has ambiguous negation"
+      end
+    end
+    return !branches_ignore.any? { |pattern| excludes_every_generated_branch?(pattern) }
+  end
+
+  true
 end
 
 def push_may_run_generated_branch?(configuration)
@@ -212,55 +300,66 @@ def push_may_run_generated_branch?(configuration)
     raise WorkflowSafetyError, "on.push contains unsupported filter(s): #{unsupported.join(', ')}"
   end
 
-  filters = PUSH_FILTERS.to_h { |key| [key, filter_patterns(configuration, key)] }
-  if filters["branches"] && filters["branches-ignore"]
-    raise WorkflowSafetyError, "on.push cannot combine branches and branches-ignore"
-  end
-  if filters["tags"] && filters["tags-ignore"]
+  PUSH_FILTERS.each { |key| static_patterns(configuration, key, "on.push") }
+  if configuration.key?("tags") && configuration.key?("tags-ignore")
     raise WorkflowSafetyError, "on.push cannot combine tags and tags-ignore"
   end
-  if filters["paths"] && filters["paths-ignore"]
+  if configuration.key?("paths") && configuration.key?("paths-ignore")
     raise WorkflowSafetyError, "on.push cannot combine paths and paths-ignore"
   end
 
-  if filters["branches"]
-    return branches_may_match_generated?(filters["branches"])
-  end
-  if filters["branches-ignore"]
-    filters["branches-ignore"].each.with_index do |pattern, index|
-      if pattern.start_with?("!") || pattern.include?("!")
-        raise WorkflowSafetyError, "on.push.branches-ignore[#{index}] has ambiguous negation"
-      end
-    end
-    return !filters["branches-ignore"].any? { |pattern| excludes_every_generated_branch?(pattern) }
-  end
+  has_branch_filters = configuration.key?("branches") || configuration.key?("branches-ignore")
+  return branch_filters_may_match_generated?(configuration, "on.push") if has_branch_filters
 
   # GitHub suppresses branch pushes when only tag filters are configured.
-  return false if filters["tags"] || filters["tags-ignore"]
+  return false if configuration.key?("tags") || configuration.key?("tags-ignore")
 
   true
 end
 
-def protected_trigger_reason(workflow)
-  unless workflow.key?("on")
-    raise WorkflowSafetyError, "workflow is missing top-level on trigger"
+def validate_protected_event_configuration!(event, configuration)
+  return if configuration.nil?
+  unless configuration.is_a?(Hash)
+    raise WorkflowSafetyError, "on.#{event} must be empty or a filter mapping"
   end
 
-  events = trigger_events(workflow["on"])
-  pr_event = PR_EVENTS.find { |event| events.key?(event) }
-  if pr_event
-    configuration = events[pr_event]
-    unless configuration.nil? || configuration.is_a?(Hash)
-      raise WorkflowSafetyError, "on.#{pr_event} must be empty or a filter mapping"
-    end
+  allowed = PROTECTED_EVENT_FILTERS.fetch(event)
+  unsupported = configuration.keys - allowed
+  unless unsupported.empty?
+    raise WorkflowSafetyError, "on.#{event} contains unsupported filter(s): #{unsupported.join(', ')}"
+  end
+  allowed.each { |key| static_patterns(configuration, key, "on.#{event}") }
+  if configuration.key?("branches") && configuration.key?("branches-ignore")
+    raise WorkflowSafetyError, "on.#{event} cannot combine branches and branches-ignore"
+  end
+  if configuration.key?("paths") && configuration.key?("paths-ignore")
+    raise WorkflowSafetyError, "on.#{event} cannot combine paths and paths-ignore"
+  end
+end
+
+def parse_workflow_run(configuration)
+  unless configuration.is_a?(Hash)
+    raise WorkflowSafetyError, "on.workflow_run must be an explicit filter mapping"
   end
 
-  generated_push = events.key?("push") && push_may_run_generated_branch?(events["push"])
-  return "#{pr_event} and generated-branch push" if pr_event && generated_push
-  return pr_event if pr_event
-  return "generated-branch push" if generated_push
+  unsupported = configuration.keys - WORKFLOW_RUN_FILTERS
+  unless unsupported.empty?
+    raise WorkflowSafetyError, "on.workflow_run contains unsupported filter(s): #{unsupported.join(', ')}"
+  end
 
-  nil
+  upstream_names = static_patterns(configuration, "workflows", "on.workflow_run")
+  unless upstream_names
+    raise WorkflowSafetyError, "on.workflow_run.workflows must explicitly name every upstream workflow"
+  end
+  if upstream_names.uniq.length != upstream_names.length
+    raise WorkflowSafetyError, "on.workflow_run.workflows contains duplicate upstream names"
+  end
+  static_patterns(configuration, "types", "on.workflow_run") if configuration.key?("types")
+
+  WorkflowRunConfig.new(
+    upstream_names: upstream_names,
+    branch_taint_reachable: branch_filters_may_match_generated?(configuration, "on.workflow_run")
+  )
 end
 
 def workflow_call_trigger?(workflow)
@@ -274,6 +373,123 @@ def workflow_call_trigger?(workflow)
     raise WorkflowSafetyError, "on.workflow_call must be empty or a mapping"
   end
   true
+end
+
+def workflow_name!(entry)
+  name = entry.workflow["name"]
+  unless name.is_a?(String) && !name.strip.empty? && !name.match?(GITHUB_EXPRESSION)
+    raise WorkflowSafetyError,
+          "#{entry.relative_path} must declare a static non-empty name for workflow_run resolution"
+  end
+  name.strip
+end
+
+def detect_workflow_run_cycles!(analyses)
+  states = {}
+  stack = []
+  visit = lambda do |analysis|
+    path = analysis.entry.relative_path
+    if states[path] == :visiting
+      cycle_start = stack.index(path) || 0
+      cycle = (stack[cycle_start..] + [path]).join(" -> ")
+      raise WorkflowSafetyError, "workflow_run cycle detected: #{cycle}"
+    end
+    return if states[path] == :visited
+
+    states[path] = :visiting
+    stack << path
+    analysis.upstreams.each { |upstream| visit.call(upstream) } if analysis.workflow_run
+    stack.pop
+    states[path] = :visited
+  end
+
+  analyses.each_value { |analysis| visit.call(analysis) }
+end
+
+def analyze_workflow_exposure(entries)
+  analyses = {}
+  entries.each_value do |entry|
+    begin
+      unless entry.workflow.key?("on")
+        raise WorkflowSafetyError, "workflow is missing top-level on trigger"
+      end
+      events = trigger_events(entry.workflow["on"])
+      exposures = Set.new
+
+      if events.key?("push") && push_may_run_generated_branch?(events["push"])
+        exposures << :branch
+      end
+      BRANCH_REVISION_EVENTS.each do |event|
+        next unless events.key?(event)
+
+        validate_protected_event_configuration!(event, events[event])
+        exposures << :branch
+      end
+      OPAQUE_REVISION_EVENTS.each do |event|
+        next unless events.key?(event)
+
+        validate_protected_event_configuration!(event, events[event])
+        exposures << :opaque
+      end
+
+      workflow_run = parse_workflow_run(events["workflow_run"]) if events.key?("workflow_run")
+      analyses[entry.relative_path] = WorkflowAnalysis.new(
+        entry: entry,
+        events: events,
+        exposures: exposures,
+        workflow_run: workflow_run,
+        upstreams: []
+      )
+    rescue WorkflowSafetyError => error
+      raise WorkflowSafetyError, "#{entry.relative_path}: #{error.message}"
+    end
+  end
+
+  listeners = analyses.values.select(&:workflow_run)
+  unless listeners.empty?
+    names = {}
+    analyses.each_value do |analysis|
+      name = workflow_name!(analysis.entry)
+      if names.key?(name)
+        raise WorkflowSafetyError,
+              "workflow name #{name.inspect} is ambiguous between #{names[name].entry.relative_path} and #{analysis.entry.relative_path}"
+      end
+      names[name] = analysis
+    end
+
+    listeners.each do |listener|
+      listener.upstreams = listener.workflow_run.upstream_names.map do |name|
+        upstream = names[name]
+        unless upstream
+          raise WorkflowSafetyError,
+                "#{listener.entry.relative_path}: on.workflow_run references missing upstream workflow #{name.inspect}"
+        end
+        upstream
+      end
+    end
+
+    detect_workflow_run_cycles!(analyses)
+
+    changed = true
+    while changed
+      changed = false
+      listeners.each do |listener|
+        listener.upstreams.each do |upstream|
+          if upstream.exposures.include?(:opaque) && !listener.exposures.include?(:opaque)
+            listener.exposures << :opaque
+            changed = true
+          end
+          if listener.workflow_run.branch_taint_reachable && upstream.exposures.include?(:branch) &&
+             !listener.exposures.include?(:branch)
+            listener.exposures << :branch
+            changed = true
+          end
+        end
+      end
+    end
+  end
+
+  analyses
 end
 
 def parse_permissions(value, location)
@@ -366,6 +582,17 @@ def resolve_local_workflow!(uses, entries, location)
   target
 end
 
+def effective_job_writes!(job, job_location, workflow_permissions)
+  if job.key?("permissions")
+    parse_permissions(job["permissions"], "#{job_location}.permissions")
+  elsif workflow_permissions
+    workflow_permissions
+  else
+    raise WorkflowSafetyError,
+          "#{job_location} inherits repository-default token permissions; explicit read-only permissions are required"
+  end
+end
+
 def enforce_policy!(entry, entries, inherited_permissions = nil, stack = [])
   if stack.include?(entry.relative_path)
     cycle = (stack + [entry.relative_path]).join(" -> ")
@@ -399,14 +626,7 @@ def enforce_policy!(entry, entries, inherited_permissions = nil, stack = [])
       raise WorkflowSafetyError, "#{location}.environment can expose environment-backed credentials"
     end
 
-    effective_writes = if job.key?("permissions")
-                         parse_permissions(job["permissions"], "#{location}.permissions")
-                       elsif workflow_permissions
-                         workflow_permissions
-                       else
-                         raise WorkflowSafetyError,
-                               "#{location} inherits repository-default token permissions; explicit read-only permissions are required"
-                       end
+    effective_writes = effective_job_writes!(job, location, workflow_permissions)
     unless effective_writes.empty?
       raise WorkflowSafetyError,
             "#{location} has effective write permission(s): #{effective_writes.join(', ')}"
@@ -433,6 +653,98 @@ def enforce_policy!(entry, entries, inherited_permissions = nil, stack = [])
         raise WorkflowSafetyError, "#{location}.secrets is only valid for a reusable-workflow call"
       end
     end
+  end
+end
+
+def trusted_review_candidate?(workflow)
+  jobs = workflow["jobs"]
+  return false unless jobs.is_a?(Hash) && jobs.length == 1
+
+  job = jobs.values.first
+  job.is_a?(Hash) && job["uses"].is_a?(String) && job["uses"].start_with?(TRUSTED_REVIEW_PREFIX)
+end
+
+def enforce_trusted_review_dispatch!(analysis)
+  workflow = analysis.entry.workflow
+  events = analysis.events
+  unless !events.empty? && (events.keys - TRUSTED_REVIEW_EVENTS.keys).empty?
+    raise WorkflowSafetyError,
+          "trusted review dispatch may use only issue_comment, pull_request_review and pull_request_review_comment"
+  end
+  events.each do |event, configuration|
+    expected = {"types" => TRUSTED_REVIEW_EVENTS.fetch(event)}
+    unless configuration == expected
+      raise WorkflowSafetyError,
+            "on.#{event} must use exactly types: [#{TRUSTED_REVIEW_EVENTS.fetch(event).join(', ')}] for trusted review dispatch"
+    end
+  end
+
+  top_level = workflow.reject { |key, _value| key == "jobs" }
+  secret_location = find_secret_reference(top_level, "workflow")
+  if secret_location
+    raise WorkflowSafetyError, "#{secret_location} references the secrets context outside the trusted mapping"
+  end
+  if workflow.key?("env")
+    raise WorkflowSafetyError, "trusted review dispatch must not define workflow-level env"
+  end
+
+  unless workflow.key?("permissions")
+    raise WorkflowSafetyError, "trusted review dispatch requires explicit read-only workflow permissions"
+  end
+  workflow_permissions = parse_permissions(workflow["permissions"], "workflow.permissions")
+
+  job_name, job = workflow["jobs"].first
+  location = "jobs.#{job_name}"
+  if job.key?("environment")
+    raise WorkflowSafetyError, "#{location}.environment can expose environment-backed credentials"
+  end
+  if job.key?("steps")
+    raise WorkflowSafetyError, "#{location} must not execute steps in trusted review dispatch"
+  end
+
+  effective_writes = effective_job_writes!(job, location, workflow_permissions)
+  unless effective_writes.empty?
+    raise WorkflowSafetyError,
+          "#{location} has effective write permission(s): #{effective_writes.join(', ')}"
+  end
+
+  unless job["uses"].match?(TRUSTED_REVIEW_REFERENCE)
+    raise WorkflowSafetyError, "#{location}.uses must pin the trusted HMCTS review workflow to a 40-character SHA"
+  end
+
+  with = job["with"]
+  unless with.is_a?(Hash)
+    raise WorkflowSafetyError, "#{location}.with must be an explicit input mapping"
+  end
+  unsupported_inputs = with.keys - TRUSTED_REVIEW_INPUTS
+  unless unsupported_inputs.empty?
+    raise WorkflowSafetyError, "#{location}.with contains unsupported input(s): #{unsupported_inputs.join(', ')}"
+  end
+  missing_inputs = REQUIRED_TRUSTED_REVIEW_INPUTS - with.keys
+  unless missing_inputs.empty?
+    raise WorkflowSafetyError, "#{location}.with is missing required input(s): #{missing_inputs.join(', ')}"
+  end
+  with.each do |name, value|
+    unless value.is_a?(String) && (!value.match?(GITHUB_EXPRESSION) || value.match?(STATIC_VAR_EXPRESSION))
+      raise WorkflowSafetyError, "#{location}.with.#{name} must be a literal or static vars reference"
+    end
+  end
+
+  secrets = job["secrets"]
+  unless secrets.is_a?(Hash) && secrets.keys.sort == TRUSTED_REVIEW_SECRETS.sort
+    raise WorkflowSafetyError, "#{location}.secrets must map exactly the four trusted review secrets"
+  end
+  TRUSTED_REVIEW_SECRETS.each do |name|
+    expected = "${{ secrets.#{name} }}"
+    unless secrets[name] == expected
+      raise WorkflowSafetyError, "#{location}.secrets.#{name} must map exactly to #{expected}"
+    end
+  end
+
+  job_without_secrets = job.reject { |key, _value| key == "secrets" }
+  secret_location = find_secret_reference(job_without_secrets, location)
+  if secret_location
+    raise WorkflowSafetyError, "#{secret_location} references the secrets context outside the trusted mapping"
   end
 end
 
@@ -498,14 +810,28 @@ rescue StandardError => error
   errors << ".github/workflows: parser failure #{error.class}: #{error.message.lines.first.strip}"
 end
 
-entries.each_value do |entry|
+analyses = {}
+begin
+  analyses = analyze_workflow_exposure(entries)
+rescue WorkflowSafetyError => error
+  errors << error.message
+rescue StandardError => error
+  errors << ".github/workflows: graph analysis failure #{error.class}: #{error.message.lines.first.strip}"
+end
+
+analyses.each_value do |analysis|
+  next if analysis.exposures.empty?
+
   begin
-    reason = protected_trigger_reason(entry.workflow)
-    enforce_policy!(entry, entries) if reason
+    if trusted_review_candidate?(analysis.entry.workflow)
+      enforce_trusted_review_dispatch!(analysis)
+    else
+      enforce_policy!(analysis.entry, entries)
+    end
   rescue WorkflowSafetyError => error
-    errors << "#{entry.relative_path}: #{error.message}"
+    errors << "#{analysis.entry.relative_path}: #{error.message}"
   rescue StandardError => error
-    errors << "#{entry.relative_path}: parser failure #{error.class}: #{error.message.lines.first.strip}"
+    errors << "#{analysis.entry.relative_path}: parser failure #{error.class}: #{error.message.lines.first.strip}"
   end
 end
 
@@ -514,4 +840,4 @@ unless errors.empty?
   exit 1
 end
 
-puts "Caller workflows reachable from PR or generated Codex pushes are explicitly read-only and credential-free."
+puts "Caller workflows reachable from untrusted revisions or downstream workflow_run chains are explicitly isolated."

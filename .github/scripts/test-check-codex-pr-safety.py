@@ -21,6 +21,43 @@ def reusable(body: str) -> str:
     return workflow(body, trigger="on: workflow_call")
 
 
+def named_workflow(name: str, body: str, *, trigger: str) -> str:
+    return f"name: {name}\n{workflow(body, trigger=trigger)}"
+
+
+def trusted_review_wrapper() -> str:
+    return f"""name: Codex PR Review
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+jobs:
+  review:
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-feedback.yml@{'1' * 40}
+    with:
+      runner_label: codex-juror-api-aks
+      github_app_client_id: ${{{{ vars.CODEX_GITHUB_APP_CLIENT_ID }}}}
+      sonar_host_url: https://sonarcloud.io
+      sonar_project_key: juror-api
+    secrets:
+      CODEX_OPENAI_API_KEY: ${{{{ secrets.CODEX_OPENAI_API_KEY }}}}
+      CODEX_GITHUB_APP_PRIVATE_KEY: ${{{{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}}}
+      CODEX_JIRA_PR_NOTIFY_URL: ${{{{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}}}
+      CODEX_SONAR_TOKEN: ${{{{ secrets.CODEX_SONAR_TOKEN }}}}
+"""
+
+
 class CheckCodexPrSafetyTests(unittest.TestCase):
     def run_check(
         self,
@@ -708,6 +745,552 @@ jobs:
                     **extra_workflows,
                 }
                 self.assert_workflows_blocked(workflows, diagnostic)
+
+    def test_review_event_roots_reject_write_oidc_secrets_and_environments(self):
+        triggers = {
+            "pull_request_review": "on:\n  pull_request_review:\n    types: [submitted]",
+            "pull_request_review_comment": (
+                "on:\n  pull_request_review_comment:\n    types: [created]"
+            ),
+        }
+        cases = {
+            "contents write": (
+                """permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps: []""",
+                "effective write permission(s): contents",
+            ),
+            "OIDC": (
+                """permissions:
+  id-token: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps: []""",
+                "effective write permission(s): id-token",
+            ),
+            "secret checkout": (
+                """permissions: read-all
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets.REVIEW_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}""",
+                "references the secrets context",
+            ),
+            "environment": (
+                """permissions: read-all
+jobs:
+  inspect:
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}""",
+                "environment-backed credentials",
+            ),
+        }
+        for event, trigger in triggers.items():
+            for exposure, (body, diagnostic) in cases.items():
+                with self.subTest(event=event, exposure=exposure):
+                    self.assert_blocked(
+                        workflow(body, trigger=trigger),
+                        diagnostic,
+                    )
+
+    def test_review_event_filter_ambiguity_fails_closed(self):
+        triggers = {
+            "sequence required": "on:\n  pull_request_review:\n    types: submitted",
+            "dynamic type": (
+                "on:\n  pull_request_review_comment:\n"
+                "    types: ['${{ inputs.review_action }}']"
+            ),
+            "unsupported branch filter": (
+                "on:\n  pull_request_review:\n"
+                "    types: [submitted]\n"
+                "    branches: [main]"
+            ),
+            "mapping required": "on:\n  pull_request_review: submitted",
+        }
+        for diagnostic, trigger in triggers.items():
+            with self.subTest(diagnostic=diagnostic):
+                self.assert_blocked(
+                    workflow(
+                        """permissions: read-all
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps: []""",
+                        trigger=trigger,
+                    ),
+                    {
+                        "sequence required": "must be a non-empty sequence",
+                        "dynamic type": "dynamic or ambiguous",
+                        "unsupported branch filter": "unsupported filter(s): branches",
+                        "mapping required": "must be empty or a filter mapping",
+                    }[diagnostic],
+                )
+
+    def test_review_event_recursively_checks_local_reusable_workflows(self):
+        self.assert_workflows_blocked(
+            {
+                "ci.yml": workflow(
+                    """permissions: read-all
+jobs:
+  inspect:
+    uses: ./.github/workflows/inspect.yml""",
+                    trigger="on:\n  pull_request_review:\n    types: [submitted]",
+                ),
+                "inspect.yml": reusable(
+                    """permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps: []"""
+                ),
+            },
+            "effective write permission(s): contents",
+        )
+
+    def test_accepts_only_the_immutable_trusted_review_command_wrapper(self):
+        completed = self.run_check({"codex_pr_review.yml": trusted_review_wrapper()})
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        mutations = {
+            "40-character SHA": trusted_review_wrapper().replace(
+                f"@{'1' * 40}", "@main", 1
+            ),
+            "exactly types": trusted_review_wrapper().replace(
+                "types: [submitted]", "types: [submitted, edited]", 1
+            ),
+            "must not execute steps": trusted_review_wrapper().replace(
+                "    with:\n", "    steps: []\n    with:\n", 1
+            ),
+            "four trusted review secrets": trusted_review_wrapper().replace(
+                "      CODEX_SONAR_TOKEN:", "      EXTRA_SECRET: literal\n      CODEX_SONAR_TOKEN:", 1
+            ),
+            "effective write permission": trusted_review_wrapper().replace(
+                "      issues: read\n    uses:", "      issues: write\n    uses:", 1
+            ),
+        }
+        for diagnostic, content in mutations.items():
+            with self.subTest(diagnostic=diagnostic):
+                self.assert_blocked(
+                    content,
+                    diagnostic,
+                    filename="codex_pr_review.yml",
+                )
+
+    def test_other_automatic_revision_event_roots_are_protected(self):
+        triggers = {
+            "create": "on: create",
+            "review thread": (
+                "on:\n  pull_request_review_thread:\n    types: [resolved]"
+            ),
+            "issue comment": "on:\n  issue_comment:\n    types: [created]",
+            "merge group": "on:\n  merge_group:\n    types: [checks_requested]",
+            "commit comment": "on:\n  commit_comment:\n    types: [created]",
+            "check run": "on:\n  check_run:\n    types: [completed]",
+            "check suite": "on:\n  check_suite:\n    types: [completed]",
+            "status": "on: status",
+        }
+        for event, trigger in triggers.items():
+            with self.subTest(event=event):
+                self.assert_blocked(
+                    workflow(
+                        """permissions:
+  contents: write
+jobs:
+  privileged:
+    runs-on: ubuntu-latest
+    steps: []""",
+                        trigger=trigger,
+                    ),
+                    "effective write permission(s): contents",
+                )
+
+    def test_trusted_operator_and_default_branch_events_remain_permitted(self):
+        triggers = {
+            "workflow dispatch": "on: workflow_dispatch",
+            "repository dispatch": (
+                "on:\n  repository_dispatch:\n    types: [trusted-command]"
+            ),
+            "schedule": "on:\n  schedule:\n    - cron: '0 3 * * *'",
+        }
+        for event, trigger in triggers.items():
+            with self.subTest(event=event):
+                completed = self.run_check(
+                    {
+                        "trusted.yml": workflow(
+                            """permissions: write-all
+jobs:
+  trusted:
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets.TRUSTED_TOKEN }}
+    steps: []""",
+                            trigger=trigger,
+                        )
+                    }
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_workflow_run_rejects_completed_and_requested_privileged_listeners(self):
+        for activity_type in ("completed", "requested"):
+            with self.subTest(activity_type=activity_type):
+                self.assert_workflows_blocked(
+                    {
+                        "build.yml": named_workflow(
+                            "Generated Build",
+                            """permissions: read-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: []""",
+                            trigger="on: pull_request",
+                        ),
+                        "listener.yml": named_workflow(
+                            "Privileged Listener",
+                            """permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps: []""",
+                            trigger=(
+                                "on:\n  workflow_run:\n"
+                                "    workflows: [Generated Build]\n"
+                                f"    types: [{activity_type}]"
+                            ),
+                        ),
+                    },
+                    "effective write permission(s): contents",
+                    filename="listener.yml",
+                )
+
+    def test_workflow_run_head_sha_checkout_cannot_receive_secrets(self):
+        self.assert_workflows_blocked(
+            {
+                "build.yml": named_workflow(
+                    "Generated Build",
+                    """permissions: read-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: []""",
+                    trigger="on:\n  push:\n    branches: ['codex/**']",
+                ),
+                "listener.yml": named_workflow(
+                    "Secret Listener",
+                    """permissions: read-all
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}""",
+                    trigger=(
+                        "on:\n  workflow_run:\n"
+                        "    workflows: [Generated Build]\n"
+                        "    types: [completed]"
+                    ),
+                ),
+            },
+            "references the secrets context",
+            filename="listener.yml",
+        )
+
+    def test_workflow_run_branch_filters_resolve_generated_push_reachability(self):
+        listener_body = """permissions: write-all
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+    steps: []"""
+        for filter_block in (
+            "branches: [main]",
+            "branches-ignore: ['codex/**']",
+        ):
+            with self.subTest(filter_block=filter_block):
+                completed = self.run_check(
+                    {
+                        "build.yml": named_workflow(
+                            "Generated Build",
+                            """permissions: read-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: []""",
+                            trigger="on:\n  push:\n    branches: ['codex/**']",
+                        ),
+                        "listener.yml": named_workflow(
+                            "Trusted Listener",
+                            listener_body,
+                            trigger=(
+                                "on:\n  workflow_run:\n"
+                                "    workflows: [Generated Build]\n"
+                                "    types: [completed]\n"
+                                f"    {filter_block}"
+                            ),
+                        ),
+                    }
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        self.assert_workflows_blocked(
+            {
+                "build.yml": named_workflow(
+                    "Generated Build",
+                    """permissions: read-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: []""",
+                    trigger="on: pull_request",
+                ),
+                "listener.yml": named_workflow(
+                    "Generated Listener",
+                    listener_body,
+                    trigger=(
+                        "on:\n  workflow_run:\n"
+                        "    workflows: [Generated Build]\n"
+                        "    types: [completed]\n"
+                        "    branches: ['codex/**']"
+                    ),
+                ),
+            },
+            "references the secrets context",
+            filename="listener.yml",
+        )
+
+    def test_workflow_run_cannot_filter_opaque_review_reachability_by_branch(self):
+        self.assert_workflows_blocked(
+            {
+                "review.yml": named_workflow(
+                    "Review Input",
+                    """permissions: read-all
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps: []""",
+                    trigger="on:\n  pull_request_review:\n    types: [submitted]",
+                ),
+                "listener.yml": named_workflow(
+                    "Review Listener",
+                    """permissions:
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps: []""",
+                    trigger=(
+                        "on:\n  workflow_run:\n"
+                        "    workflows: [Review Input]\n"
+                        "    types: [completed]\n"
+                        "    branches: [main]"
+                    ),
+                ),
+            },
+            "effective write permission(s): id-token",
+            filename="listener.yml",
+        )
+
+    def test_workflow_run_name_filters_and_multiple_upstreams_are_resolved(self):
+        safe_upstream = named_workflow(
+            "Trusted Build",
+            """permissions: write-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: []""",
+            trigger="on:\n  push:\n    branches: [main]",
+        )
+        listener = named_workflow(
+            "Listener",
+            """permissions: write-all
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps: []""",
+            trigger=(
+                "on:\n  workflow_run:\n"
+                "    workflows: [Trusted Build]\n"
+                "    types: [completed]"
+            ),
+        )
+        completed = self.run_check(
+            {"trusted.yml": safe_upstream, "listener.yml": listener}
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        self.assert_workflows_blocked(
+            {
+                "trusted.yml": safe_upstream,
+                "generated.yml": named_workflow(
+                    "Generated Build",
+                    """permissions: read-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: []""",
+                    trigger="on: pull_request",
+                ),
+                "listener.yml": listener.replace(
+                    "workflows: [Trusted Build]",
+                    "workflows: [Trusted Build, Generated Build]",
+                ),
+            },
+            "effective write permission",
+            filename="listener.yml",
+        )
+
+    def test_workflow_run_missing_dynamic_and_ambiguous_names_fail_closed(self):
+        cases = {
+            "explicitly name": "types: [completed]",
+            "missing upstream workflow": (
+                "workflows: [Missing Build]\n    types: [completed]"
+            ),
+            "dynamic or ambiguous": (
+                "workflows: ['${{ inputs.workflow }}']\n    types: [completed]"
+            ),
+        }
+        for diagnostic, configuration in cases.items():
+            with self.subTest(diagnostic=diagnostic):
+                self.assert_workflows_blocked(
+                    {
+                        "listener.yml": named_workflow(
+                            "Listener",
+                            """permissions: read-all
+jobs:
+  listen:
+    runs-on: ubuntu-latest
+    steps: []""",
+                            trigger=f"on:\n  workflow_run:\n    {configuration}",
+                        )
+                    },
+                    diagnostic,
+                    filename="listener.yml",
+                )
+
+    def test_workflow_run_cycles_fail_closed(self):
+        self.assert_workflows_blocked(
+            {
+                "a.yml": named_workflow(
+                    "Workflow A",
+                    """permissions: read-all
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps: []""",
+                    trigger=(
+                        "on:\n  workflow_run:\n"
+                        "    workflows: [Workflow B]\n"
+                        "    types: [completed]"
+                    ),
+                ),
+                "b.yml": named_workflow(
+                    "Workflow B",
+                    """permissions: read-all
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps: []""",
+                    trigger=(
+                        "on:\n  workflow_run:\n"
+                        "    workflows: [Workflow A]\n"
+                        "    types: [requested]"
+                    ),
+                ),
+            },
+            "workflow_run cycle detected",
+            filename="a.yml",
+        )
+
+    def test_workflow_run_propagates_transitively_and_into_local_reusable_calls(self):
+        build = named_workflow(
+            "Generated Build",
+            """permissions: read-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: []""",
+            trigger="on: pull_request",
+        )
+        package = named_workflow(
+            "Package",
+            """permissions: read-all
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps: []""",
+            trigger=(
+                "on:\n  workflow_run:\n"
+                "    workflows: [Generated Build]\n"
+                "    types: [completed]"
+            ),
+        )
+        deploy = named_workflow(
+            "Deploy",
+            """permissions:
+  deployments: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps: []""",
+            trigger=(
+                "on:\n  workflow_run:\n"
+                "    workflows: [Package]\n"
+                "    types: [completed]"
+            ),
+        )
+        self.assert_workflows_blocked(
+            {"build.yml": build, "package.yml": package, "deploy.yml": deploy},
+            "effective write permission(s): deployments",
+            filename="deploy.yml",
+        )
+
+        self.assert_workflows_blocked(
+            {
+                "build.yml": build,
+                "listener.yml": named_workflow(
+                    "Reusable Listener",
+                    """permissions: read-all
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy.yml""",
+                    trigger=(
+                        "on:\n  workflow_run:\n"
+                        "    workflows: [Generated Build]\n"
+                        "    types: [completed]"
+                    ),
+                ),
+                "deploy.yml": named_workflow(
+                    "Reusable Deploy",
+                    """permissions:
+  id-token: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps: []""",
+                    trigger="on: workflow_call",
+                ),
+            },
+            "effective write permission(s): id-token",
+            filename="listener.yml",
+        )
 
 
 if __name__ == "__main__":

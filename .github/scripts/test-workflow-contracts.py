@@ -106,6 +106,18 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("`security-events: write`", content)
         self.assertIn("`id-token: write`", content)
 
+    def test_rollout_documents_dual_tree_event_root_policy(self):
+        content = ROLLOUT.read_text(encoding="utf-8")
+        self.assertIn("Credential-free verification applies the generated patch", content)
+        self.assertIn("checks the unchanged trusted default-branch tree", content)
+        self.assertIn("complete listener graph", content)
+        self.assertIn("listener cycles fail closed", content)
+        self.assertIn("only credential-bearing review-event exception", content)
+        self.assertIn("literal 40-character SHA", content)
+        self.assertIn("cannot contain executable steps", content)
+        self.assertIn("`workflow_dispatch` requires a trusted operator", content)
+        self.assertIn("`repository_dispatch` requires an authenticated trusted service", content)
+
     def test_model_preflight_never_executes_repository_gradle_wrapper(self):
         content = PREFLIGHT.read_text(encoding="utf-8")
         self.assertNotIn("./gradlew", content)

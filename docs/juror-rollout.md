@@ -50,6 +50,24 @@ The dispatch rule triggers when `codex-ready` is added. It must:
 
 The JS callback rule consumes the Azure Function's project-specific webhook. For `pr-created`, transition to `Peer Review`, add `pr-ready`, remove `codex-running` and comment with the PR and workflow links. For `codex-blocked`, `codex-failed` or `codex-no-changes`, remove `codex-running` and comment with the supplied message and workflow link.
 
+## Generated-revision event policy
+
+The immutable structural checker runs at both sides of publication. Credential-free verification applies the generated patch and checks the resulting tree. Every secret-bearing publication job separately checks the unchanged trusted default-branch tree before minting a GitHub App token. Both checks are required: the first prevents a generated workflow from introducing an unsafe trigger, while the second prevents a patch deletion or rename from hiding an already-active default-branch listener.
+
+The policy treats these automatic event roots as able to reach an unreviewed revision: generated `codex/**` pushes and branch creation; `pull_request`, `pull_request_target`, review, review-comment, review-thread and PR issue-comment events; merge-group revisions; commit comments, check runs, check suites and statuses. It also resolves every local `workflow_run` listener by static workflow name and propagates exposure through the complete listener graph. Missing or duplicate names, dynamic filters, unsupported filters and listener cycles fail closed. A branch filter can stop branch-tainted `codex/**` push/PR runs only when it statically excludes every generated branch; it cannot clear opaque review or PR-context exposure.
+
+The only credential-bearing review-event exception is the caller's `/codex-review` command wrapper. Its workflow definition is loaded from the caller's default branch, it may contain only the three exact `created`/`submitted` command triggers, it must call `hmcts/codex-agent-workflows/.github/workflows/codex-review-feedback.yml` at a literal 40-character SHA, and it may map only the four exact review secrets. The wrapper cannot contain executable steps, write/OIDC permissions, an environment or event-derived inputs. The pinned shared workflow checks writer permission and the explicit command before it reads the generated revision, and model-facing jobs retain their existing credential isolation.
+
+Events intentionally outside the automatic generated-revision set are limited by their trust boundary:
+
+- `schedule` loads the immutable default-branch definition and has no untrusted revision payload;
+- `workflow_dispatch` requires a trusted operator, and `repository_dispatch` requires an authenticated trusted service such as the configured Jira router;
+- release, deployment, package and repository-administration events require a credentialed actor that generated verification jobs do not possess;
+- issue/discussion/community events that do not identify a PR or commit carry content but no executable revision; and
+- push filters proven disjoint from `codex/**`, plus tags-only pushes, cannot be activated by generated branch publication.
+
+These exclusions do not authorize a trusted workflow to turn arbitrary event fields into a checkout ref. Any new event that can be emitted by a generated branch or can identify its PR, commit or check must be added to the structural root model before activation.
+
 ## Platform activation
 
 1. Merge the shared workflow PR after required review and record the resulting 40-character `main` release SHA.
