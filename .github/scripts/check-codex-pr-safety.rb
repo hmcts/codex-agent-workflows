@@ -3,6 +3,7 @@
 
 require "psych"
 require "set"
+require "uri"
 require "yaml"
 
 PUSH_FILTERS = %w[branches branches-ignore paths paths-ignore tags tags-ignore].freeze
@@ -69,6 +70,7 @@ GITHUB_EXPRESSION = /\$\{\{/.freeze
 GLOB_MAGIC = /[*?\[\]{}+@]/.freeze
 LOCAL_WORKFLOW = %r{\A\./\.github/workflows/([^/]+\.ya?ml)\z}.freeze
 STATIC_VAR_EXPRESSION = /\A\$\{\{\s*vars\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}\z/.freeze
+APPROVED_SONAR_URL = "https://sonarcloud.io"
 
 WorkflowEntry = Struct.new(:relative_path, :absolute_path, :workflow, keyword_init: true)
 WorkflowRunConfig = Struct.new(:upstream_names, :branch_taint_reachable, keyword_init: true)
@@ -78,6 +80,7 @@ WorkflowAnalysis = Struct.new(
   :exposures,
   :workflow_run,
   :upstreams,
+  :snapshot,
   keyword_init: true
 )
 
@@ -388,25 +391,26 @@ def detect_workflow_run_cycles!(analyses)
   states = {}
   stack = []
   visit = lambda do |analysis|
-    path = analysis.entry.relative_path
-    if states[path] == :visiting
-      cycle_start = stack.index(path) || 0
-      cycle = (stack[cycle_start..] + [path]).join(" -> ")
+    key = analysis.object_id
+    label = "#{analysis.snapshot}:#{analysis.entry.relative_path}"
+    if states[key] == :visiting
+      cycle_start = stack.index(label) || 0
+      cycle = (stack[cycle_start..] + [label]).join(" -> ")
       raise WorkflowSafetyError, "workflow_run cycle detected: #{cycle}"
     end
-    return if states[path] == :visited
+    return if states[key] == :visited
 
-    states[path] = :visiting
-    stack << path
+    states[key] = :visiting
+    stack << label
     analysis.upstreams.each { |upstream| visit.call(upstream) } if analysis.workflow_run
     stack.pop
-    states[path] = :visited
+    states[key] = :visited
   end
 
   analyses.each_value { |analysis| visit.call(analysis) }
 end
 
-def analyze_workflow_exposure(entries)
+def parse_workflow_analyses(entries, snapshot)
   analyses = {}
   entries.each_value do |entry|
     begin
@@ -438,58 +442,109 @@ def analyze_workflow_exposure(entries)
         events: events,
         exposures: exposures,
         workflow_run: workflow_run,
-        upstreams: []
+        upstreams: [],
+        snapshot: snapshot
       )
     rescue WorkflowSafetyError => error
       raise WorkflowSafetyError, "#{entry.relative_path}: #{error.message}"
     end
   end
 
-  listeners = analyses.values.select(&:workflow_run)
-  unless listeners.empty?
-    names = {}
-    analyses.each_value do |analysis|
-      name = workflow_name!(analysis.entry)
-      if names.key?(name)
+  analyses
+end
+
+def workflow_name_map!(analyses, snapshot)
+  names = {}
+  analyses.each_value do |analysis|
+    name = workflow_name!(analysis.entry)
+    if names.key?(name)
+      raise WorkflowSafetyError,
+            "#{snapshot} workflow name #{name.inspect} is ambiguous between #{names[name].entry.relative_path} and #{analysis.entry.relative_path}"
+    end
+    names[name] = analysis
+  end
+  names
+end
+
+def resolve_snapshot_graph!(analyses, names)
+  analyses.values.select(&:workflow_run).each do |listener|
+    listener.upstreams = listener.workflow_run.upstream_names.map do |name|
+      upstream = names[name]
+      unless upstream
         raise WorkflowSafetyError,
-              "workflow name #{name.inspect} is ambiguous between #{names[name].entry.relative_path} and #{analysis.entry.relative_path}"
+              "#{listener.entry.relative_path}: on.workflow_run references missing upstream workflow #{name.inspect}"
       end
-      names[name] = analysis
+      upstream
     end
+  end
+  detect_workflow_run_cycles!(analyses)
+end
 
+def propagate_snapshot_exposure!(analyses)
+  listeners = analyses.values.select(&:workflow_run)
+  changed = true
+  while changed
+    changed = false
     listeners.each do |listener|
-      listener.upstreams = listener.workflow_run.upstream_names.map do |name|
-        upstream = names[name]
-        unless upstream
-          raise WorkflowSafetyError,
-                "#{listener.entry.relative_path}: on.workflow_run references missing upstream workflow #{name.inspect}"
-        end
-        upstream
+      reachable = listener.upstreams.any? do |upstream|
+        upstream.exposures.include?(:opaque) ||
+          (listener.workflow_run.branch_taint_reachable && upstream.exposures.include?(:branch))
+      end
+      next unless reachable && !listener.exposures.include?(:opaque)
+
+      # A workflow_run listener loads its definition from the default branch. Later
+      # listeners cannot safely use branch filters to erase this transitive exposure.
+      listener.exposures << :opaque
+      changed = true
+    end
+  end
+end
+
+def analyze_two_tree_exposure(candidate_entries, trusted_entries)
+  candidate = parse_workflow_analyses(candidate_entries, :candidate)
+  trusted = parse_workflow_analyses(trusted_entries, :trusted)
+  all_listeners = candidate.values.select(&:workflow_run) + trusted.values.select(&:workflow_run)
+  return [candidate, trusted, trusted.transform_values { |analysis| analysis.exposures.dup }] if all_listeners.empty?
+
+  candidate_names = workflow_name_map!(candidate, :candidate)
+  trusted_names = workflow_name_map!(trusted, :trusted)
+
+  resolve_snapshot_graph!(candidate, candidate_names)
+  propagate_snapshot_exposure!(candidate)
+
+  trusted.values.select(&:workflow_run).each do |listener|
+    listener.workflow_run.upstream_names.each do |name|
+      unless candidate_names.key?(name) || trusted_names.key?(name)
+        raise WorkflowSafetyError,
+              "#{listener.entry.relative_path}: on.workflow_run references missing candidate/trusted upstream workflow #{name.inspect}"
       end
     end
+    listener.upstreams = listener.workflow_run.upstream_names.map { |name| trusted_names[name] }.compact
+  end
+  detect_workflow_run_cycles!(trusted)
 
-    detect_workflow_run_cycles!(analyses)
-
-    changed = true
-    while changed
-      changed = false
-      listeners.each do |listener|
-        listener.upstreams.each do |upstream|
-          if upstream.exposures.include?(:opaque) && !listener.exposures.include?(:opaque)
-            listener.exposures << :opaque
-            changed = true
-          end
-          if listener.workflow_run.branch_taint_reachable && upstream.exposures.include?(:branch) &&
-             !listener.exposures.include?(:branch)
-            listener.exposures << :branch
-            changed = true
-          end
-        end
+  cross_exposures = trusted.transform_values { |analysis| analysis.exposures.dup }
+  listeners = trusted.values.select(&:workflow_run)
+  changed = true
+  while changed
+    changed = false
+    listeners.each do |listener|
+      reachable = listener.workflow_run.upstream_names.any? do |name|
+        candidate_source = candidate_names[name]&.exposures || Set.new
+        trusted_source = trusted_names[name] ? cross_exposures.fetch(trusted_names[name].entry.relative_path) : Set.new
+        candidate_source.include?(:opaque) || trusted_source.include?(:opaque) ||
+          (listener.workflow_run.branch_taint_reachable &&
+           (candidate_source.include?(:branch) || trusted_source.include?(:branch)))
       end
+      path = listener.entry.relative_path
+      next unless reachable && !cross_exposures.fetch(path).include?(:opaque)
+
+      cross_exposures.fetch(path) << :opaque
+      changed = true
     end
   end
 
-  analyses
+  [candidate, trusted, cross_exposures]
 end
 
 def parse_permissions(value, location)
@@ -664,7 +719,21 @@ def trusted_review_candidate?(workflow)
   job.is_a?(Hash) && job["uses"].is_a?(String) && job["uses"].start_with?(TRUSTED_REVIEW_PREFIX)
 end
 
-def enforce_trusted_review_dispatch!(analysis)
+def validate_approved_sonar_url!(value, location)
+  begin
+    uri = URI.parse(value.to_s)
+  rescue URI::InvalidURIError
+    uri = nil
+  end
+  valid_origin = uri && uri.scheme == "https" && uri.host == "sonarcloud.io" &&
+                 uri.userinfo.nil? && uri.port == 443 && uri.path.empty? &&
+                 uri.query.nil? && uri.fragment.nil?
+  unless valid_origin && value == APPROVED_SONAR_URL
+    raise WorkflowSafetyError, "#{location} must equal the approved Sonar origin #{APPROVED_SONAR_URL}"
+  end
+end
+
+def trusted_review_contract!(analysis)
   workflow = analysis.entry.workflow
   events = analysis.events
   unless !events.empty? && (events.keys - TRUSTED_REVIEW_EVENTS.keys).empty?
@@ -724,6 +793,7 @@ def enforce_trusted_review_dispatch!(analysis)
   unless missing_inputs.empty?
     raise WorkflowSafetyError, "#{location}.with is missing required input(s): #{missing_inputs.join(', ')}"
   end
+  validate_approved_sonar_url!(with["sonar_host_url"], "#{location}.with.sonar_host_url")
   with.each do |name, value|
     unless value.is_a?(String) && (!value.match?(GITHUB_EXPRESSION) || value.match?(STATIC_VAR_EXPRESSION))
       raise WorkflowSafetyError, "#{location}.with.#{name} must be a literal or static vars reference"
@@ -745,6 +815,26 @@ def enforce_trusted_review_dispatch!(analysis)
   secret_location = find_secret_reference(job_without_secrets, location)
   if secret_location
     raise WorkflowSafetyError, "#{secret_location} references the secrets context outside the trusted mapping"
+  end
+
+  {
+    "pin" => job["uses"].delete_prefix(TRUSTED_REVIEW_PREFIX),
+    "with" => with
+  }
+end
+
+def enforce_trusted_review_dispatch!(analysis, approved_analysis = nil)
+  candidate_contract = trusted_review_contract!(analysis)
+  return unless approved_analysis && approved_analysis != analysis
+
+  approved_contract = trusted_review_contract!(approved_analysis)
+  unless candidate_contract["pin"] == approved_contract["pin"]
+    raise WorkflowSafetyError,
+          "trusted review workflow pin must equal the immutable default-branch pin #{approved_contract['pin']}"
+  end
+  unless candidate_contract["with"] == approved_contract["with"]
+    raise WorkflowSafetyError,
+          "trusted review inputs must equal the immutable default-branch wrapper contract"
   end
 end
 
@@ -791,13 +881,24 @@ def discover_workflows(repository_root)
   [entries, errors]
 end
 
-repository_root = File.expand_path(Dir.pwd)
-if ARGV.length == 2 && ARGV[0] == "--repository-root"
-  repository_root = File.expand_path(ARGV[1])
-elsif !ARGV.empty?
-  warn "usage: #{$PROGRAM_NAME} [--repository-root PATH]"
+options = {}
+arguments = ARGV.dup
+until arguments.empty?
+  option = arguments.shift
+  value = arguments.shift
+  unless %w[--repository-root --trusted-repository-root].include?(option) && value && !options.key?(option)
+    warn "usage: #{$PROGRAM_NAME} --repository-root PATH --trusted-repository-root PATH"
+    exit 2
+  end
+  options[option] = File.expand_path(value)
+end
+unless options.keys.sort == %w[--repository-root --trusted-repository-root].sort
+  warn "usage: #{$PROGRAM_NAME} --repository-root PATH --trusted-repository-root PATH"
   exit 2
 end
+
+repository_root = options.fetch("--repository-root")
+trusted_repository_root = options.fetch("--trusted-repository-root")
 
 errors = []
 entries = {}
@@ -810,21 +911,41 @@ rescue StandardError => error
   errors << ".github/workflows: parser failure #{error.class}: #{error.message.lines.first.strip}"
 end
 
-analyses = {}
+trusted_entries = {}
 begin
-  analyses = analyze_workflow_exposure(entries)
+  trusted_entries, discovery_errors = discover_workflows(trusted_repository_root)
+  errors.concat(discovery_errors.map { |error| "trusted:#{error}" })
 rescue WorkflowSafetyError => error
-  errors << error.message
+  errors << "trusted:.github/workflows: #{error.message}"
 rescue StandardError => error
-  errors << ".github/workflows: graph analysis failure #{error.class}: #{error.message.lines.first.strip}"
+  errors << "trusted:.github/workflows: parser failure #{error.class}: #{error.message.lines.first.strip}"
 end
 
-analyses.each_value do |analysis|
+candidate_analyses = {}
+trusted_analyses = {}
+trusted_cross_exposures = {}
+if errors.empty?
+  begin
+    candidate_analyses, trusted_analyses, trusted_cross_exposures =
+      analyze_two_tree_exposure(entries, trusted_entries)
+  rescue WorkflowSafetyError => error
+    errors << error.message
+  rescue StandardError => error
+    errors << ".github/workflows: graph analysis failure #{error.class}: #{error.message.lines.first.strip}"
+  end
+end
+
+candidate_analyses.each_value do |analysis|
   next if analysis.exposures.empty?
 
   begin
     if trusted_review_candidate?(analysis.entry.workflow)
-      enforce_trusted_review_dispatch!(analysis)
+      approved = trusted_analyses[analysis.entry.relative_path]
+      unless approved && trusted_review_candidate?(approved.entry.workflow)
+        raise WorkflowSafetyError,
+              "trusted review dispatch has no approved immutable default-branch wrapper at the same path"
+      end
+      enforce_trusted_review_dispatch!(analysis, approved)
     else
       enforce_policy!(analysis.entry, entries)
     end
@@ -832,6 +953,22 @@ analyses.each_value do |analysis|
     errors << "#{analysis.entry.relative_path}: #{error.message}"
   rescue StandardError => error
     errors << "#{analysis.entry.relative_path}: parser failure #{error.class}: #{error.message.lines.first.strip}"
+  end
+end
+
+trusted_analyses.each_value do |analysis|
+  next if trusted_cross_exposures.fetch(analysis.entry.relative_path, Set.new).empty?
+
+  begin
+    if trusted_review_candidate?(analysis.entry.workflow)
+      enforce_trusted_review_dispatch!(analysis)
+    else
+      enforce_policy!(analysis.entry, trusted_entries)
+    end
+  rescue WorkflowSafetyError => error
+    errors << "trusted:#{analysis.entry.relative_path}: #{error.message}"
+  rescue StandardError => error
+    errors << "trusted:#{analysis.entry.relative_path}: parser failure #{error.class}: #{error.message.lines.first.strip}"
   end
 end
 

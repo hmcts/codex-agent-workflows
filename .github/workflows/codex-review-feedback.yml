@@ -326,6 +326,8 @@ jobs:
       EXPECTED_PR_NUMBER: ${{ needs.detect-codex-pr.outputs.pr_number }}
       EXPECTED_HEAD_REF: ${{ needs.detect-codex-pr.outputs.head_ref }}
       EXPECTED_HEAD_SHA: ${{ needs.codex-review-generate-action.outputs.head_sha }}
+      EXPECTED_BASE_SHA: ${{ needs.codex-review-generate-action.outputs.base_sha }}
+      POLICY_CANDIDATE_BASE_SHA: ${{ needs.codex-review-generate-action.outputs.head_sha }}
 
     steps:
       - name: Locate trusted Codex runtime
@@ -338,8 +340,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Checkout candidate policy base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: codex-policy-candidate
+
+      - name: Download Codex review output
+        uses: actions/download-artifact@v8
+        with:
+          name: codex-review-output
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Materialize candidate policy tree
+        env:
+          CANDIDATE_ROOT: ${{ github.workspace }}/codex-policy-candidate
+          EXPECTED_CANDIDATE_SHA: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          PATCH_PATH: ${{ runner.temp }}/codex-output/changes.patch
+        run: '"${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh"'
+
       - name: Enforce pull-request credential isolation
-        run: ruby --disable-gems ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb --repository-root "$GITHUB_WORKSPACE"
+        run: |
+          ruby --disable-gems "${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb" \
+            --repository-root "$GITHUB_WORKSPACE/codex-policy-candidate" \
+            --trusted-repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -366,12 +392,6 @@ jobs:
         run: |
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-publish.sh "$RUNNER_TEMP/codex-pr-review-publish.sh"
           chmod +x "$RUNNER_TEMP/codex-pr-review-publish.sh"
-
-      - name: Download Codex review output
-        uses: actions/download-artifact@v8
-        with:
-          name: codex-review-output
-          path: ${{ runner.temp }}/codex-output
 
       - name: Download verified Codex review output
         uses: actions/download-artifact@v8
@@ -520,6 +540,7 @@ jobs:
           tar -czf "$RUNNER_TEMP/codex-review-published-source.tar.gz" .
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb "$RUNNER_TEMP/trusted-check-codex-pr-safety.rb"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh "$RUNNER_TEMP/trusted-codex-prepare-policy-candidate.sh"
           cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
           echo "head_sha=${PUBLISHED_HEAD_SHA}" >>"$GITHUB_OUTPUT"
           echo "base_sha=${BASE_SHA}" >>"$GITHUB_OUTPUT"
@@ -532,6 +553,7 @@ jobs:
             ${{ runner.temp }}/codex-review-published-source.tar.gz
             ${{ runner.temp }}/trusted-codex-pr-review-verify.sh
             ${{ runner.temp }}/trusted-check-codex-pr-safety.rb
+            ${{ runner.temp }}/trusted-codex-prepare-policy-candidate.sh
             ${{ runner.temp }}/trusted-codex-local-pipeline.sh
           if-no-files-found: error
           retention-days: 1
@@ -746,6 +768,7 @@ jobs:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
           TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-check-codex-pr-safety.rb
+          TRUSTED_POLICY_PREPARER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-prepare-policy-candidate.sh
         run: |
           set +e
           bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh" >"$RUNNER_TEMP/codex-review-external-repair-verification.log" 2>&1
@@ -804,6 +827,8 @@ jobs:
       EXPECTED_PR_NUMBER: ${{ needs.codex-review-generate-action.outputs.pr_number }}
       EXPECTED_HEAD_REF: ${{ needs.codex-review-generate-action.outputs.head_ref }}
       EXPECTED_HEAD_SHA: ${{ needs.prepare-published-review-repair-source.outputs.head_sha }}
+      EXPECTED_BASE_SHA: ${{ needs.codex-review-generate-action.outputs.base_sha }}
+      POLICY_CANDIDATE_BASE_SHA: ${{ needs.prepare-published-review-repair-source.outputs.head_sha }}
       CODEX_OUTPUT_ARTIFACT: ${{ needs.codex-review-external-repair-verify.outputs.output_artifact }}
       CODEX_VERIFIED_ARTIFACT: ${{ needs.codex-review-external-repair-verify.outputs.verified_artifact }}
 
@@ -818,8 +843,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Checkout candidate policy base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: codex-policy-candidate
+
+      - name: Download external-status repair output
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Materialize candidate policy tree
+        env:
+          CANDIDATE_ROOT: ${{ github.workspace }}/codex-policy-candidate
+          EXPECTED_CANDIDATE_SHA: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          PATCH_PATH: ${{ runner.temp }}/codex-output/changes.patch
+        run: '"${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh"'
+
       - name: Enforce pull-request credential isolation
-        run: ruby --disable-gems ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb --repository-root "$GITHUB_WORKSPACE"
+        run: |
+          ruby --disable-gems "${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb" \
+            --repository-root "$GITHUB_WORKSPACE/codex-policy-candidate" \
+            --trusted-repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -846,12 +895,6 @@ jobs:
         run: |
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-publish.sh "$RUNNER_TEMP/codex-pr-review-publish.sh"
           chmod +x "$RUNNER_TEMP/codex-pr-review-publish.sh"
-
-      - name: Download external-status repair output
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
-          path: ${{ runner.temp }}/codex-output
 
       - name: Download verified external-status repair
         uses: actions/download-artifact@v8
@@ -1046,6 +1089,7 @@ jobs:
           tar -czf "$RUNNER_TEMP/codex-review-source.tar.gz" .
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb "$RUNNER_TEMP/trusted-check-codex-pr-safety.rb"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh "$RUNNER_TEMP/trusted-codex-prepare-policy-candidate.sh"
           cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
 
       - name: Upload credential-free review source
@@ -1056,6 +1100,7 @@ jobs:
             ${{ runner.temp }}/codex-review-source.tar.gz
             ${{ runner.temp }}/trusted-codex-pr-review-verify.sh
             ${{ runner.temp }}/trusted-check-codex-pr-safety.rb
+            ${{ runner.temp }}/trusted-codex-prepare-policy-candidate.sh
             ${{ runner.temp }}/trusted-codex-local-pipeline.sh
           if-no-files-found: error
           retention-days: 1
@@ -1116,6 +1161,7 @@ jobs:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
           TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-check-codex-pr-safety.rb
+          TRUSTED_POLICY_PREPARER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-prepare-policy-candidate.sh
         run: |
           set +e
           bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh" >"$RUNNER_TEMP/codex-review-verification.log" 2>&1

@@ -19,6 +19,7 @@ required_env "EXPECTED_HEAD_SHA"
 required_env "EXPECTED_BASE_SHA"
 required_env "TRUSTED_PIPELINE_PATH"
 required_env "TRUSTED_PR_SAFETY_PATH"
+required_env "TRUSTED_POLICY_PREPARER_PATH"
 
 output_dir="${OUTPUT_DIR}"
 metadata_path="${output_dir}/metadata.env"
@@ -30,7 +31,9 @@ artifact_dir="${RUNNER_TEMP:-/tmp}/codex-review-verify-${GITHUB_RUN_ID:-manual}-
 sanitized_home="${artifact_dir}/sanitized-home"
 sanitized_tmp="${artifact_dir}/sanitized-tmp"
 trusted_pipeline_path="${artifact_dir}/trusted-codex-local-pipeline.sh"
+trusted_repository_root="${artifact_dir}/trusted-repository"
 safety_gate_path="${TRUSTED_PR_SAFETY_PATH}"
+policy_preparer_path="${TRUSTED_POLICY_PREPARER_PATH}"
 trusted_pipeline_sha=""
 guardrail_review_required="false"
 guardrail_pathspecs=(
@@ -195,13 +198,25 @@ if [[ "${actual_head_sha}" != "${EXPECTED_HEAD_SHA}" || "${actual_base_sha}" != 
   exit 1
 fi
 git_sanitized checkout -B "${head_ref}" "${EXPECTED_HEAD_SHA}"
-git_sanitized apply --index --binary "${patch_path}"
+if [[ ! -f "${policy_preparer_path}" || -L "${policy_preparer_path}" ]]; then
+  echo "Missing trusted policy candidate preparer: ${policy_preparer_path}" >&2
+  exit 1
+fi
+run_sanitized env \
+  CANDIDATE_ROOT="$(pwd -P)" \
+  EXPECTED_CANDIDATE_SHA="${EXPECTED_HEAD_SHA}" \
+  PATCH_PATH="${patch_path}" \
+  TRUSTED_REPOSITORY_ROOT="${trusted_repository_root}" \
+  EXPECTED_TRUSTED_SHA="${EXPECTED_BASE_SHA}" \
+  "${policy_preparer_path}"
 
 if [[ ! -f "${safety_gate_path}" || -L "${safety_gate_path}" ]]; then
   echo "Missing trusted PR credential safety gate: ${safety_gate_path}" >&2
   exit 1
 fi
-run_sanitized ruby --disable-gems "${safety_gate_path}" --repository-root .
+run_sanitized ruby --disable-gems "${safety_gate_path}" \
+  --repository-root . \
+  --trusted-repository-root "${trusted_repository_root}"
 
 detect_guardrail_changes
 append_guardrail_warning

@@ -108,12 +108,15 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_rollout_documents_dual_tree_event_root_policy(self):
         content = ROLLOUT.read_text(encoding="utf-8")
-        self.assertIn("Credential-free verification applies the generated patch", content)
-        self.assertIn("checks the unchanged trusted default-branch tree", content)
+        self.assertIn("same two-snapshot policy decision", content)
+        self.assertIn("candidate event roots and upstream names", content)
+        self.assertIn("unchanged trusted default-branch listeners", content)
+        self.assertIn("cannot be materialized and parsed", content)
         self.assertIn("complete listener graph", content)
         self.assertIn("listener cycles fail closed", content)
         self.assertIn("only credential-bearing review-event exception", content)
-        self.assertIn("literal 40-character SHA", content)
+        self.assertIn("same reviewed 40-character SHA", content)
+        self.assertIn("exactly `https://sonarcloud.io`", content)
         self.assertIn("cannot contain executable steps", content)
         self.assertIn("`workflow_dispatch` requires a trusted operator", content)
         self.assertIn("`repository_dispatch` requires an authenticated trusted service", content)
@@ -162,41 +165,88 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_all_publication_jobs_gate_pr_oidc_before_token_minting(self):
         expected_jobs = {
-            IMPLEMENT_WORKFLOW: (
-                "publish-draft-pr",
-                "publish-pr",
-                "publish-published-pr-repair-1",
-            ),
-            REVIEW_WORKFLOW: (
-                "codex-review-publish",
-                "codex-review-external-republish",
-            ),
+            IMPLEMENT_WORKFLOW: {
+                "publish-draft-pr": (
+                    "${{ needs.prepare-codex-verification-source.outputs.source_sha }}"
+                ),
+                "publish-pr": (
+                    "${{ needs.prepare-codex-verification-source.outputs.source_sha }}"
+                ),
+                "publish-published-pr-repair-1": (
+                    "${{ needs.publish-pr.outputs.commit_sha }}"
+                ),
+            },
+            REVIEW_WORKFLOW: {
+                "codex-review-publish": (
+                    "${{ needs.codex-review-generate-action.outputs.head_sha }}"
+                ),
+                "codex-review-external-republish": (
+                    "${{ needs.prepare-published-review-repair-source.outputs.head_sha }}"
+                ),
+            },
         }
-        for workflow, job_names in expected_jobs.items():
+        for workflow, jobs in expected_jobs.items():
             content = workflow.read_text(encoding="utf-8")
-            for job_name in job_names:
+            for job_name, candidate_base in jobs.items():
                 start = content.index(f"  {job_name}:")
                 next_job = re.search(
                     r"(?m)^  [A-Za-z0-9_-]+:\s*$", content[start + 3 :]
                 )
                 end = start + 3 + next_job.start() if next_job else len(content)
                 job = content[start:end]
+                checkout = job.index("Checkout candidate policy base")
+                download = job.index("path: ${{ runner.temp }}/codex-output")
+                materialize = job.index("codex-prepare-policy-candidate.sh")
                 gate = job.index("check-codex-pr-safety.rb")
                 token = job.index("actions/create-github-app-token@")
+                self.assertLess(
+                    checkout, download, f"candidate output precedes checkout in {job_name}"
+                )
+                self.assertLess(
+                    download, materialize, f"candidate output is not materialized in {job_name}"
+                )
+                self.assertLess(
+                    materialize, gate, f"candidate tree is not gated in {job_name}"
+                )
                 self.assertLess(gate, token, f"late credential gate in {job_name}")
+                self.assertIn(
+                    f"POLICY_CANDIDATE_BASE_SHA: {candidate_base}", job
+                )
+                self.assertIn("ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}", job)
+                self.assertIn(
+                    '--repository-root "$GITHUB_WORKSPACE/codex-policy-candidate"',
+                    job,
+                )
+                self.assertIn(
+                    '--trusted-repository-root "$GITHUB_WORKSPACE"', job
+                )
 
     def test_verifiers_gate_applied_patch_with_trusted_checker(self):
         for name in ("codex-jira-verify.sh", "codex-pr-review-verify.sh"):
             content = (ROOT / "scripts" / name).read_text(encoding="utf-8")
-            apply_patch = content.index('apply --index --binary "${patch_path}"')
+            prepare = content.index('"${policy_preparer_path}"')
             safety_gate = content.index(
                 'run_sanitized ruby --disable-gems "${safety_gate_path}"'
             )
-            self.assertLess(apply_patch, safety_gate)
+            self.assertLess(prepare, safety_gate)
+            self.assertIn('PATCH_PATH="${patch_path}"', content)
+            self.assertIn(
+                'TRUSTED_REPOSITORY_ROOT="${trusted_repository_root}"', content
+            )
+            self.assertIn("EXPECTED_TRUSTED_SHA=", content)
+            self.assertIn('--repository-root . \\', content)
+            self.assertIn(
+                '--trusted-repository-root "${trusted_repository_root}"', content
+            )
+            self.assertIn("Missing trusted policy candidate preparer", content)
 
     def test_review_verification_bundle_includes_structural_safety_checker(self):
         content = REVIEW_WORKFLOW.read_text(encoding="utf-8")
         self.assertEqual(content.count("trusted-check-codex-pr-safety.rb"), 6)
+        self.assertEqual(
+            content.count("trusted-codex-prepare-policy-candidate.sh"), 6
+        )
+        self.assertEqual(content.count("TRUSTED_POLICY_PREPARER_PATH:"), 2)
         self.assertNotIn("trusted-check-codex-pr-safety.py", content)
 
     def test_jira_no_change_result_has_terminal_callback(self):

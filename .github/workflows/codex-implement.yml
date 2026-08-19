@@ -1529,6 +1529,7 @@ jobs:
       ISSUE_URL: ${{ inputs.issueUrl }}
       EXPECTED_BRANCH_NAME: ${{ needs.codex-generate.outputs.branch_name }}
       EXPECTED_BASE_SHA: ${{ needs.prepare-codex-verification-source.outputs.source_sha }}
+      POLICY_CANDIDATE_BASE_SHA: ${{ needs.prepare-codex-verification-source.outputs.source_sha }}
       JIRA_PUBLISH_MODE: initial
       PR_DRAFT: "true"
       CODEX_OUTPUT_ARTIFACT: ${{ needs.prepare-draft-publication.outputs.output_artifact }}
@@ -1548,8 +1549,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Checkout candidate policy base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: codex-policy-candidate
+
+      - name: Download latest Codex output
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Materialize candidate policy tree
+        env:
+          CANDIDATE_ROOT: ${{ github.workspace }}/codex-policy-candidate
+          EXPECTED_CANDIDATE_SHA: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          PATCH_PATH: ${{ runner.temp }}/codex-output/changes.patch
+        run: '"${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh"'
+
       - name: Enforce pull-request credential isolation
-        run: ruby --disable-gems ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb --repository-root "$GITHUB_WORKSPACE"
+        run: |
+          ruby --disable-gems "${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb" \
+            --repository-root "$GITHUB_WORKSPACE/codex-policy-candidate" \
+            --trusted-repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -1571,12 +1596,6 @@ jobs:
           GITHUB_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           GITHUB_APP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
         run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
-
-      - name: Download latest Codex output
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
-          path: ${{ runner.temp }}/codex-output
 
       - name: Download unverified publication metadata
         uses: actions/download-artifact@v8
@@ -1688,6 +1707,7 @@ jobs:
       ISSUE_URL: ${{ inputs.issueUrl }}
       EXPECTED_BRANCH_NAME: ${{ needs.codex-generate.outputs.branch_name }}
       EXPECTED_BASE_SHA: ${{ needs.prepare-codex-verification-source.outputs.source_sha }}
+      POLICY_CANDIDATE_BASE_SHA: ${{ needs.prepare-codex-verification-source.outputs.source_sha }}
       JIRA_PUBLISH_MODE: initial
       CODEX_OUTPUT_ARTIFACT: ${{ needs.verify-codex-output-3.outputs.passed == 'true' && needs.verify-codex-output-3.outputs.output_artifact || needs.verify-codex-output-2.outputs.passed == 'true' && needs.verify-codex-output-2.outputs.output_artifact || needs.verify-codex-output-1.outputs.passed == 'true' && needs.verify-codex-output-1.outputs.output_artifact || needs.verify-codex-output.outputs.output_artifact }}
       CODEX_VERIFIED_ARTIFACT: ${{ needs.verify-codex-output-3.outputs.passed == 'true' && needs.verify-codex-output-3.outputs.verified_artifact || needs.verify-codex-output-2.outputs.passed == 'true' && needs.verify-codex-output-2.outputs.verified_artifact || needs.verify-codex-output-1.outputs.passed == 'true' && needs.verify-codex-output-1.outputs.verified_artifact || needs.verify-codex-output.outputs.verified_artifact }}
@@ -1705,8 +1725,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Checkout candidate policy base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: codex-policy-candidate
+
+      - name: Download Codex output
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Materialize candidate policy tree
+        env:
+          CANDIDATE_ROOT: ${{ github.workspace }}/codex-policy-candidate
+          EXPECTED_CANDIDATE_SHA: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          PATCH_PATH: ${{ runner.temp }}/codex-output/changes.patch
+        run: '"${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh"'
+
       - name: Enforce pull-request credential isolation
-        run: ruby --disable-gems ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb --repository-root "$GITHUB_WORKSPACE"
+        run: |
+          ruby --disable-gems "${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb" \
+            --repository-root "$GITHUB_WORKSPACE/codex-policy-candidate" \
+            --trusted-repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -1734,12 +1778,6 @@ jobs:
         run: |
           echo "output_artifact=${CODEX_OUTPUT_ARTIFACT}" >>"$GITHUB_OUTPUT"
           echo "verified_artifact=${CODEX_VERIFIED_ARTIFACT}" >>"$GITHUB_OUTPUT"
-
-      - name: Download Codex output
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
-          path: ${{ runner.temp }}/codex-output
 
       - name: Download verified Codex output
         uses: actions/download-artifact@v8
@@ -2229,6 +2267,7 @@ jobs:
       EXPECTED_BASE_SHA: ${{ needs.prepare-codex-verification-source.outputs.source_sha }}
       JIRA_PUBLISH_MODE: repair
       EXPECTED_BRANCH_HEAD_SHA: ${{ needs.publish-pr.outputs.commit_sha }}
+      POLICY_CANDIDATE_BASE_SHA: ${{ needs.publish-pr.outputs.commit_sha }}
       CODEX_OUTPUT_ARTIFACT: ${{ needs.verify-published-pr-repair-1.outputs.output_artifact }}
       CODEX_VERIFIED_ARTIFACT: ${{ needs.verify-published-pr-repair-1.outputs.verified_artifact }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
@@ -2245,8 +2284,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Checkout candidate policy base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: codex-policy-candidate
+
+      - name: Download repaired Codex output
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Materialize candidate policy tree
+        env:
+          CANDIDATE_ROOT: ${{ github.workspace }}/codex-policy-candidate
+          EXPECTED_CANDIDATE_SHA: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          PATCH_PATH: ${{ runner.temp }}/codex-output/changes.patch
+        run: '"${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh"'
+
       - name: Enforce pull-request credential isolation
-        run: ruby --disable-gems ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb --repository-root "$GITHUB_WORKSPACE"
+        run: |
+          ruby --disable-gems "${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb" \
+            --repository-root "$GITHUB_WORKSPACE/codex-policy-candidate" \
+            --trusted-repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -2274,12 +2337,6 @@ jobs:
         run: |
           echo "output_artifact=${CODEX_OUTPUT_ARTIFACT}" >>"$GITHUB_OUTPUT"
           echo "verified_artifact=${CODEX_VERIFIED_ARTIFACT}" >>"$GITHUB_OUTPUT"
-
-      - name: Download repaired Codex output
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
-          path: ${{ runner.temp }}/codex-output
 
       - name: Download verified repaired Codex output
         uses: actions/download-artifact@v8
