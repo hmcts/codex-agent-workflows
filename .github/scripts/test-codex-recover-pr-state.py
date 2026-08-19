@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("codex-recover-pr-state.py")
@@ -159,6 +161,81 @@ class PullRequestRecoveryTests(unittest.TestCase):
         )
 
         self.assertEqual(state, {"found": False})
+
+
+class FreshPullRequestRecoveryTests(unittest.TestCase):
+    def recover_fresh(
+        self,
+        discovered: dict[str, object],
+        fresh: dict[str, object],
+    ) -> dict[str, object]:
+        with mock.patch.object(
+            MODULE,
+            "fetch_pull_request_by_number",
+            return_value=fresh,
+        ) as fetch:
+            state = MODULE.recover_fresh_pull_request(
+                [discovered],
+                repository=REPOSITORY,
+                base_ref=BASE_REF,
+                base_sha=BASE_SHA,
+                head_ref=HEAD_REF,
+                head_sha=HEAD_SHA,
+                draft=False,
+                allow_missing=False,
+            )
+        fetch.assert_called_once_with(REPOSITORY, 42)
+        return state
+
+    def test_unchanged_fresh_record_is_the_only_emitted_state(self):
+        discovered = pull_request(42)
+        discovered["html_url"] = "https://github.com/hmcts/example/pull/stale"
+        fresh = pull_request(42)
+
+        state = self.recover_fresh(discovered, fresh)
+
+        self.assertEqual(state["pr_number"], 42)
+        self.assertEqual(state["pr_url"], fresh["html_url"])
+
+    def test_rejects_each_field_moving_after_paginated_discovery(self):
+        changes = {
+            "repository": lambda pull: pull["base"]["repo"].update(
+                {"full_name": "hmcts/other"}
+            ),
+            "base ref": lambda pull: pull["base"].update({"ref": "develop"}),
+            "base SHA": lambda pull: pull["base"].update({"sha": "c" * 40}),
+            "head ref": lambda pull: pull["head"].update({"ref": "codex/other"}),
+            "head repository": lambda pull: pull["head"]["repo"].update(
+                {"full_name": "contributor/example"}
+            ),
+            "head SHA": lambda pull: pull["head"].update({"sha": "d" * 40}),
+            "state": lambda pull: pull.update({"state": "closed"}),
+            "draft state": lambda pull: pull.update({"draft": True}),
+        }
+        for field, mutate in changes.items():
+            with self.subTest(field=field):
+                fresh = copy.deepcopy(pull_request(42))
+                mutate(fresh)
+                with self.assertRaisesRegex(MODULE.RecoveryError, field):
+                    self.recover_fresh(pull_request(42), fresh)
+
+    def test_fails_closed_when_fresh_fetch_fails(self):
+        with mock.patch.object(
+            MODULE,
+            "fetch_pull_request_by_number",
+            side_effect=MODULE.RecoveryError("HTTP 502"),
+        ):
+            with self.assertRaisesRegex(MODULE.RecoveryError, "HTTP 502"):
+                MODULE.recover_fresh_pull_request(
+                    [pull_request(42)],
+                    repository=REPOSITORY,
+                    base_ref=BASE_REF,
+                    base_sha=BASE_SHA,
+                    head_ref=HEAD_REF,
+                    head_sha=HEAD_SHA,
+                    draft=False,
+                    allow_missing=False,
+                )
 
 
 if __name__ == "__main__":

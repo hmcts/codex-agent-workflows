@@ -43,6 +43,7 @@ class PublisherRevisionTest(unittest.TestCase):
         pr_head_repository: str = "hmcts/example",
         pr_is_draft: bool = False,
         multiple_prs: bool = False,
+        post_push_head: str = NEW_SHA,
     ) -> tuple[Path, Path]:
         fake_bin = root / "bin"
         fake_bin.mkdir()
@@ -54,6 +55,7 @@ class PublisherRevisionTest(unittest.TestCase):
         head_responses = root / "head-responses"
         base_counter = root / "base-counter"
         head_counter = root / "head-counter"
+        pushed_head = root / "pushed-head"
         base_responses.write_text("\n".join(base_sequence) + "\n", encoding="utf-8")
         head_responses.write_text("\n".join(head_sequence) + "\n", encoding="utf-8")
         fake_git = fake_bin / "git"
@@ -84,11 +86,17 @@ if [[ "$args" == *"ls-remote"* ]]; then
       printf '%s\\trefs/heads/master\\n' "$response"
     fi
   elif [[ "$args" == *"refs/heads/codex/example"* ]]; then
-    response="$(next_response {str(head_responses)!r} {str(head_counter)!r})"
+    if [[ -f {str(pushed_head)!r} ]]; then
+      response="$(cat {str(pushed_head)!r})"
+    else
+      response="$(next_response {str(head_responses)!r} {str(head_counter)!r})"
+    fi
     if [[ -n "$response" ]]; then
       printf '%s\\trefs/heads/codex/example\\n' "$response"
     fi
   fi
+elif [[ "$args" == *"push"* && "$args" == *"codex/example"* ]]; then
+  printf '%s\\n' {post_push_head!r} >{str(pushed_head)!r}
 elif [[ "$args" == *"rev-parse refs/remotes/origin/codex/example"* ]]; then
   printf '%s\\n' {HEAD_SHA!r}
 elif [[ "$args" == *"rev-parse refs/remotes/origin/master"* ]]; then
@@ -467,6 +475,7 @@ esac
         pr_is_draft: bool = False,
         multiple_prs: bool = False,
         expected_draft: bool = False,
+        post_push_head: str = NEW_SHA,
     ) -> tuple[subprocess.CompletedProcess[str], str, str]:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -489,6 +498,7 @@ esac
                 pr_head_repository=pr_head_repository,
                 pr_is_draft=pr_is_draft,
                 multiple_prs=multiple_prs,
+                post_push_head=post_push_head,
             )
             github_output = root / "github-output"
             env = {
@@ -766,6 +776,30 @@ esac
         self.assertIn("gh api --paginate --slurp", commands)
         self.assertNotIn("gh pr create", commands)
         self.assertNotIn("pr_url=", outputs)
+
+    def test_jira_publisher_rechecks_generated_branch_after_lookup_before_create(self) -> None:
+        for case, post_push_head in (
+            ("moved", MOVED_SHA),
+            ("unavailable", ""),
+        ):
+            with self.subTest(case=case):
+                completed, commands, outputs = self.run_jira_with_outputs(
+                    mode="initial",
+                    remote_base=[BASE_SHA, BASE_SHA, BASE_SHA],
+                    pr_exists=False,
+                    post_push_head=post_push_head,
+                )
+
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("Generated branch", completed.stderr)
+                self.assert_command_logged(commands, "push")
+                lookup = commands.index("gh api --paginate --slurp")
+                final_branch_lookup = commands.rindex(
+                    "ls-remote --exit-code --heads origin refs/heads/codex/example"
+                )
+                self.assertLess(lookup, final_branch_lookup)
+                self.assertNotIn("gh pr create", commands)
+                self.assertNotIn("pr_url=", outputs)
 
     def test_jira_recovery_rechecks_default_after_tree_validation(self) -> None:
         cases = (

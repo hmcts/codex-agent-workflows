@@ -325,10 +325,14 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertEqual(
             publisher.count(
-                'verify_default_unchanged\n  created_pr_url="$(gh_authenticated "${create_args[@]}")"'
+                "verify_default_unchanged\n"
+                "  verify_generated_branch_unchanged\n"
+                '  created_pr_url="$(gh_authenticated "${create_args[@]}")"'
             ),
             1,
         )
+        self.assertIn("Generated branch unavailable", publisher)
+        self.assertIn("before pull request creation", publisher)
         self.assertIn('--base-sha "${verified_base_sha}"', publisher)
         self.assertIn("Default branch unavailable", publisher)
         self.assertIn("Default branch moved", publisher)

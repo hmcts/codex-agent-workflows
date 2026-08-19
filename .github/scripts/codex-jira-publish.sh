@@ -183,6 +183,21 @@ verify_default_unchanged() {
   fi
 }
 
+verify_generated_branch_unchanged() {
+  local remote_ref
+  local current_branch_sha
+
+  if ! remote_ref="$(git_authenticated ls-remote --exit-code --heads origin "refs/heads/${branch_name}")" || [[ -z "${remote_ref}" ]]; then
+    echo "::error title=Generated branch unavailable::The current ${branch_name} revision could not be resolved before pull request creation." >&2
+    exit 1
+  fi
+  current_branch_sha="$(awk '{print $1}' <<<"${remote_ref}")"
+  if [[ ! "${current_branch_sha}" =~ ^[0-9a-f]{40}$ || "${current_branch_sha}" != "${commit_sha}" ]]; then
+    echo "::error title=Generated branch moved::The ${branch_name} branch changed before pull request creation." >&2
+    exit 1
+  fi
+}
+
 recover_pr_state() {
   local allow_missing="${1:-false}"
   local created_pr_url="${2:-}"
@@ -363,6 +378,7 @@ if [[ "${pr_found}" != "true" ]]; then
     create_args+=(--draft)
   fi
   verify_default_unchanged
+  verify_generated_branch_unchanged
   created_pr_url="$(gh_authenticated "${create_args[@]}")"
   recover_pr_state false "${created_pr_url}"
 fi

@@ -95,8 +95,9 @@ def pull_request_number(pr_url: str) -> int:
     return int(match.group(1))
 
 
-def fetch_pull_request(repository: str, pr_url: str) -> dict[str, Any]:
-    number = pull_request_number(pr_url)
+def fetch_pull_request_by_number(
+    repository: str, number: int
+) -> dict[str, Any]:
     pull_request = fetch_json(
         ["gh", "api", f"repos/{repository}/pulls/{number}"],
         f"pull request #{number}",
@@ -104,6 +105,10 @@ def fetch_pull_request(repository: str, pr_url: str) -> dict[str, Any]:
     if not isinstance(pull_request, dict):
         raise RecoveryError(f"Pull request #{number} response is not an object")
     return pull_request
+
+
+def fetch_pull_request(repository: str, pr_url: str) -> dict[str, Any]:
+    return fetch_pull_request_by_number(repository, pull_request_number(pr_url))
 
 
 def nested_value(value: object, *keys: str) -> object:
@@ -241,6 +246,50 @@ def recover_pull_request(
     )
 
 
+def recover_fresh_pull_request(
+    pull_requests: list[dict[str, Any]],
+    *,
+    repository: str,
+    base_ref: str,
+    base_sha: str,
+    head_ref: str,
+    head_sha: str,
+    draft: bool,
+    allow_missing: bool,
+) -> dict[str, object]:
+    discovered = recover_pull_request(
+        pull_requests,
+        repository=repository,
+        base_ref=base_ref,
+        base_sha=base_sha,
+        head_ref=head_ref,
+        head_sha=head_sha,
+        draft=draft,
+        allow_missing=allow_missing,
+    )
+    if not discovered["found"]:
+        return discovered
+
+    selected_number = discovered["pr_number"]
+    if not isinstance(selected_number, int) or isinstance(selected_number, bool):
+        raise RecoveryError("Discovered pull request has an invalid number")
+    fresh_pull_request = fetch_pull_request_by_number(repository, selected_number)
+    fresh = validate_pull_request(
+        fresh_pull_request,
+        repository=repository,
+        base_ref=base_ref,
+        base_sha=base_sha,
+        head_ref=head_ref,
+        head_sha=head_sha,
+        draft=draft,
+    )
+    if fresh["pr_number"] != selected_number:
+        raise RecoveryError(
+            "Fresh pull request response does not match the discovered number"
+        )
+    return fresh
+
+
 def write_output(path: Path, state: dict[str, object], append: bool) -> None:
     values = [
         ("found", "true" if state["found"] else "false"),
@@ -299,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
                 draft=draft,
             )
         else:
-            state = recover_pull_request(
+            state = recover_fresh_pull_request(
                 fetch_open_pull_requests(args.repository),
                 repository=args.repository,
                 base_ref=args.base_ref,
