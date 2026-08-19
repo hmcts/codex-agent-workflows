@@ -17,6 +17,13 @@ class RecoveryError(RuntimeError):
     pass
 
 
+def require_base_sha(base_sha: str) -> None:
+    if not re.fullmatch(r"[0-9a-f]{40}", base_sha):
+        raise RecoveryError(
+            "Expected base SHA is missing or is not a lowercase 40-character commit ID"
+        )
+
+
 def gh_environment() -> dict[str, str]:
     required = ("HOME", "PATH", "GH_TOKEN")
     missing = [name for name in required if not os.environ.get(name)]
@@ -113,6 +120,7 @@ def mismatch_reasons(
     *,
     repository: str,
     base_ref: str,
+    base_sha: str,
     head_ref: str,
     head_sha: str,
     draft: bool,
@@ -121,6 +129,7 @@ def mismatch_reasons(
         "state": "open",
         "base repository": repository,
         "base ref": base_ref,
+        "base SHA": base_sha,
         "head repository": repository,
         "head ref": head_ref,
         "head SHA": head_sha,
@@ -130,6 +139,7 @@ def mismatch_reasons(
         "state": pull_request.get("state"),
         "base repository": nested_value(pull_request, "base", "repo", "full_name"),
         "base ref": nested_value(pull_request, "base", "ref"),
+        "base SHA": nested_value(pull_request, "base", "sha"),
         "head repository": nested_value(pull_request, "head", "repo", "full_name"),
         "head ref": nested_value(pull_request, "head", "ref"),
         "head SHA": nested_value(pull_request, "head", "sha"),
@@ -147,14 +157,17 @@ def validate_pull_request(
     *,
     repository: str,
     base_ref: str,
+    base_sha: str,
     head_ref: str,
     head_sha: str,
     draft: bool,
 ) -> dict[str, object]:
+    require_base_sha(base_sha)
     reasons = mismatch_reasons(
         pull_request,
         repository=repository,
         base_ref=base_ref,
+        base_sha=base_sha,
         head_ref=head_ref,
         head_sha=head_sha,
         draft=draft,
@@ -193,11 +206,13 @@ def recover_pull_request(
     *,
     repository: str,
     base_ref: str,
+    base_sha: str,
     head_ref: str,
     head_sha: str,
     draft: bool,
     allow_missing: bool,
 ) -> dict[str, object]:
+    require_base_sha(base_sha)
     related = [
         pull_request
         for pull_request in pull_requests
@@ -219,6 +234,7 @@ def recover_pull_request(
         related[0],
         repository=repository,
         base_ref=base_ref,
+        base_sha=base_sha,
         head_ref=head_ref,
         head_sha=head_sha,
         draft=draft,
@@ -256,6 +272,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--repository", required=True)
     parser.add_argument("--base-ref", required=True)
+    parser.add_argument("--base-sha", required=True)
     parser.add_argument("--head-ref", required=True)
     parser.add_argument("--head-sha", required=True)
     parser.add_argument("--draft", choices=("true", "false"), required=True)
@@ -276,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
                 pull_request,
                 repository=args.repository,
                 base_ref=args.base_ref,
+                base_sha=args.base_sha,
                 head_ref=args.head_ref,
                 head_sha=args.head_sha,
                 draft=draft,
@@ -285,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
                 fetch_open_pull_requests(args.repository),
                 repository=args.repository,
                 base_ref=args.base_ref,
+                base_sha=args.base_sha,
                 head_ref=args.head_ref,
                 head_sha=args.head_sha,
                 draft=draft,

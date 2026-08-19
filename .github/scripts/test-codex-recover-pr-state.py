@@ -15,6 +15,7 @@ SPEC.loader.exec_module(MODULE)
 
 REPOSITORY = "hmcts/example"
 BASE_REF = "master"
+BASE_SHA = "b" * 40
 HEAD_REF = "codex/example"
 HEAD_SHA = "a" * 40
 
@@ -24,6 +25,7 @@ def pull_request(
     *,
     repository: str = REPOSITORY,
     base_ref: str = BASE_REF,
+    base_sha: object = BASE_SHA,
     head_repository: str = REPOSITORY,
     head_ref: str = HEAD_REF,
     head_sha: str = HEAD_SHA,
@@ -34,7 +36,11 @@ def pull_request(
         "html_url": f"https://github.com/{repository}/pull/{number}",
         "state": "open",
         "draft": draft,
-        "base": {"ref": base_ref, "repo": {"full_name": repository}},
+        "base": {
+            "ref": base_ref,
+            "sha": base_sha,
+            "repo": {"full_name": repository},
+        },
         "head": {
             "ref": head_ref,
             "sha": head_sha,
@@ -43,11 +49,17 @@ def pull_request(
     }
 
 
-def recover(pull_requests: list[dict[str, object]], *, draft: bool = False):
+def recover(
+    pull_requests: list[dict[str, object]],
+    *,
+    draft: bool = False,
+    base_sha: str = BASE_SHA,
+):
     return MODULE.recover_pull_request(
         pull_requests,
         repository=REPOSITORY,
         base_ref=BASE_REF,
+        base_sha=base_sha,
         head_ref=HEAD_REF,
         head_sha=HEAD_SHA,
         draft=draft,
@@ -90,6 +102,27 @@ class PullRequestRecoveryTests(unittest.TestCase):
                 with self.assertRaisesRegex(MODULE.RecoveryError, case):
                     recover([candidate])
 
+    def test_rejects_missing_recovered_base_sha(self):
+        with self.assertRaisesRegex(MODULE.RecoveryError, "base SHA"):
+            recover([pull_request(42, base_sha=None)])
+
+    def test_rejects_stale_or_advanced_recovered_base_sha(self):
+        for case, candidate_sha in (
+            ("stale", "c" * 40),
+            ("advanced", "d" * 40),
+        ):
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(MODULE.RecoveryError, "base SHA"):
+                    recover([pull_request(42, base_sha=candidate_sha)])
+
+    def test_rejects_missing_or_malformed_expected_base_sha(self):
+        for base_sha in ("", "abc", "B" * 40, "g" * 40):
+            with self.subTest(base_sha=base_sha):
+                with self.assertRaisesRegex(
+                    MODULE.RecoveryError, "Expected base SHA is missing"
+                ):
+                    recover([pull_request(42)], base_sha=base_sha)
+
     def test_rejects_fork_or_wrong_head_repository(self):
         with self.assertRaisesRegex(MODULE.RecoveryError, "head repository"):
             recover([pull_request(42, head_repository="contributor/example")])
@@ -118,6 +151,7 @@ class PullRequestRecoveryTests(unittest.TestCase):
             [pull_request(1, head_ref="codex/unrelated")],
             repository=REPOSITORY,
             base_ref=BASE_REF,
+            base_sha=BASE_SHA,
             head_ref=HEAD_REF,
             head_sha=HEAD_SHA,
             draft=False,

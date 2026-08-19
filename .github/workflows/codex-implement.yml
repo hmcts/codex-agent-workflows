@@ -1653,6 +1653,7 @@ jobs:
           python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-recover-pr-state.py \
             --repository "$GITHUB_REPOSITORY" \
             --base-ref "$DEFAULT_BRANCH" \
+            --base-sha "$EXPECTED_BASE_SHA" \
             --head-ref "$BRANCH_NAME" \
             --head-sha "$COMMIT_SHA" \
             --draft true \
@@ -1813,6 +1814,7 @@ jobs:
           python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-recover-pr-state.py \
             --repository "$GITHUB_REPOSITORY" \
             --base-ref "$DEFAULT_BRANCH" \
+            --base-sha "$EXPECTED_BASE_SHA" \
             --head-ref "$BRANCH_NAME" \
             --head-sha "$COMMIT_SHA" \
             --draft false \
@@ -2374,6 +2376,7 @@ jobs:
           python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-recover-pr-state.py \
             --repository "$GITHUB_REPOSITORY" \
             --base-ref "$DEFAULT_BRANCH" \
+            --base-sha "$EXPECTED_BASE_SHA" \
             --head-ref "$BRANCH_NAME" \
             --head-sha "$COMMIT_SHA" \
             --draft false \

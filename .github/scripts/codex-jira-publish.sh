@@ -189,6 +189,7 @@ recover_pr_state() {
   local recovery_args=(
     --repository "${GITHUB_REPOSITORY}"
     --base-ref "${default_branch}"
+    --base-sha "${verified_base_sha}"
     --head-ref "${branch_name}"
     --head-sha "${commit_sha}"
     --draft "${expected_pr_draft}"
@@ -361,6 +362,7 @@ if [[ "${pr_found}" != "true" ]]; then
   if [[ "${expected_pr_draft}" == "true" ]]; then
     create_args+=(--draft)
   fi
+  verify_default_unchanged
   created_pr_url="$(gh_authenticated "${create_args[@]}")"
   recover_pr_state false "${created_pr_url}"
 fi

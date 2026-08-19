@@ -37,6 +37,7 @@ class PublisherRevisionTest(unittest.TestCase):
         fail_pr_create: bool = False,
         pr_head_sha: str = NEW_SHA,
         pr_base_ref: str = "master",
+        pr_base_sha: object = BASE_SHA,
         pr_base_repository: str = "hmcts/example",
         pr_head_ref: str = "codex/example",
         pr_head_repository: str = "hmcts/example",
@@ -127,6 +128,7 @@ fi
             "draft": pr_is_draft,
             "base": {
                 "ref": pr_base_ref,
+                "sha": pr_base_sha,
                 "repo": {"full_name": pr_base_repository},
             },
             "head": {
@@ -145,6 +147,7 @@ fi
         fake_gh.write_text(
             f"""#!/usr/bin/env bash
 set -euo pipefail
+printf 'gh %s\n' "$*" >>{str(command_log)!r}
 case "$*" in
   *"api --paginate --slurp repos/hmcts/example/pulls?state=open&per_page=100"*)
     printf '%s\n' {paginated_prs!r}
@@ -457,6 +460,7 @@ esac
         fail_pr_create: bool = False,
         pr_head_sha: str = NEW_SHA,
         pr_base_ref: str = "master",
+        pr_base_sha: object = BASE_SHA,
         pr_base_repository: str = "hmcts/example",
         pr_head_ref: str = "codex/example",
         pr_head_repository: str = "hmcts/example",
@@ -479,6 +483,7 @@ esac
                 fail_pr_create=fail_pr_create,
                 pr_head_sha=pr_head_sha,
                 pr_base_ref=pr_base_ref,
+                pr_base_sha=pr_base_sha,
                 pr_base_repository=pr_base_repository,
                 pr_head_ref=pr_head_ref,
                 pr_head_repository=pr_head_repository,
@@ -605,6 +610,7 @@ esac
     def test_jira_publisher_rejects_incompatible_recovered_pr_identity(self) -> None:
         cases = {
             "wrong base": {"pr_base_ref": "develop"},
+            "wrong base SHA": {"pr_base_sha": MOVED_SHA},
             "wrong base repository": {"pr_base_repository": "hmcts/other"},
             "fork head": {"pr_head_repository": "contributor/example"},
             "wrong head ref": {"pr_head_ref": "codex/other"},
@@ -746,6 +752,20 @@ esac
         self.assertIn("Default branch unavailable", completed.stderr)
         self.assert_command_logged(commands, "commit")
         self.assert_no_push(commands)
+
+    def test_jira_publisher_rechecks_default_after_lookup_before_pr_create(self) -> None:
+        completed, commands, outputs = self.run_jira_with_outputs(
+            mode="initial",
+            remote_base=[BASE_SHA, BASE_SHA, MOVED_SHA],
+            pr_exists=False,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("Default branch moved", completed.stderr)
+        self.assert_command_logged(commands, "push")
+        self.assertIn("gh api --paginate --slurp", commands)
+        self.assertNotIn("gh pr create", commands)
+        self.assertNotIn("pr_url=", outputs)
 
     def test_jira_recovery_rechecks_default_after_tree_validation(self) -> None:
         cases = (

@@ -307,6 +307,13 @@ class WorkflowContractTests(unittest.TestCase):
             ),
             2,
         )
+        self.assertEqual(
+            publisher.count(
+                'verify_default_unchanged\n  created_pr_url="$(gh_authenticated "${create_args[@]}")"'
+            ),
+            1,
+        )
+        self.assertIn('--base-sha "${verified_base_sha}"', publisher)
         self.assertIn("Default branch unavailable", publisher)
         self.assertIn("Default branch moved", publisher)
 
@@ -414,6 +421,7 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn("codex-recover-pr-state.py", job)
             self.assertIn('--repository "$GITHUB_REPOSITORY"', job)
             self.assertIn('--base-ref "$DEFAULT_BRANCH"', job)
+            self.assertIn('--base-sha "$EXPECTED_BASE_SHA"', job)
             self.assertIn('--head-ref "$BRANCH_NAME"', job)
             self.assertIn('--head-sha "$COMMIT_SHA"', job)
             self.assertIn("--append-output", job)
