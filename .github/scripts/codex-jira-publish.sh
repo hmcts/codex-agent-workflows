@@ -22,6 +22,7 @@ required_env "VERIFICATION_DIR"
 required_env "EXPECTED_BRANCH_NAME"
 required_env "EXPECTED_BASE_SHA"
 required_env "JIRA_PUBLISH_MODE"
+required_env "CODEX_RUNTIME_PATH"
 
 case "${JIRA_PUBLISH_MODE}" in
   initial)
@@ -51,6 +52,7 @@ verification_dir="${VERIFICATION_DIR}"
 verification_path="${verification_dir}/verification.env"
 pr_body_path="${verification_dir}/codex-pr-body.md"
 trusted_notify_path="${RUNNER_TEMP:-/tmp}/trusted-notify-jira-automation.py"
+notify_source_path="${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py"
 sanitized_home="${RUNNER_TEMP:-/tmp}/codex-jira-publish-home"
 sanitized_tmp="${RUNNER_TEMP:-/tmp}/codex-jira-publish-tmp"
 
@@ -152,7 +154,11 @@ run_notify() {
 
 mkdir -p "${sanitized_home}" "${sanitized_tmp}"
 
-cp .github/scripts/notify-jira-automation.py "${trusted_notify_path}"
+if [[ ! -f "${notify_source_path}" || -L "${notify_source_path}" ]]; then
+  echo "Missing trusted Jira notification runtime: ${notify_source_path}" >&2
+  exit 1
+fi
+install -m 0500 "${notify_source_path}" "${trusted_notify_path}"
 
 branch_name="$(metadata_value branch_name)"
 verified_branch_name="$(verification_value branch_name)"

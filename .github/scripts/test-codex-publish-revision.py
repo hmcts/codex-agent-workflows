@@ -361,6 +361,8 @@ esac
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
+            caller = root / "minimal-caller"
+            caller.mkdir()
             output, verified = self.write_patch_artifacts(root, kind="jira")
             fake_bin, command_log = self.make_fake_tools(
                 root,
@@ -384,19 +386,24 @@ esac
                 "EXPECTED_BASE_SHA": BASE_SHA,
                 "JIRA_PUBLISH_MODE": mode,
                 "DEFAULT_BRANCH": "master",
+                "CODEX_RUNTIME_PATH": str(SCRIPT_DIR.parent.parent),
                 "RUNNER_TEMP": str(root / "runner"),
             }
             if mode == "repair":
                 env["EXPECTED_BRANCH_HEAD_SHA"] = HEAD_SHA
             completed = subprocess.run(
                 ["bash", str(JIRA_PUBLISHER)],
-                cwd=SCRIPT_DIR.parent.parent,
+                cwd=caller,
                 env=env,
                 capture_output=True,
                 text=True,
             )
             commands = command_log.read_text(encoding="utf-8") if command_log.exists() else ""
             return completed, commands
+
+    def test_jira_publisher_loads_notifier_from_shared_runtime(self) -> None:
+        completed, _ = self.run_jira(mode="initial")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_review_publisher_accepts_exact_verified_head(self) -> None:
         completed, _ = self.run_review(HEAD_SHA)
