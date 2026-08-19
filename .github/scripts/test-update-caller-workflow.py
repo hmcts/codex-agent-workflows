@@ -17,7 +17,7 @@ OLD_SHA = "1" * 40
 NEW_SHA = "2" * 40
 
 
-def dispatch_caller(*, include_notify: bool = False, include_summary: bool = True) -> str:
+def dispatch_caller(*, include_notify: bool = True, include_summary: bool = True) -> str:
     notify = (
         "      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}\n"
         if include_notify
@@ -48,8 +48,12 @@ jobs:
 
 def review_caller() -> str:
     return f"""name: Codex PR Review Feedback
+on:
+  issue_comment:
+    types: [created]
 jobs:
   review:
+    if: ${{{{ github.event.issue.pull_request && github.event.comment.body == '/codex-review' && contains(fromJSON('["COLLABORATOR","MEMBER","OWNER"]'), github.event.comment.author_association) }}}}
     uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-feedback.yml@{OLD_SHA}
     with:
       runner_label: codex-juror-api-aks
@@ -59,19 +63,20 @@ jobs:
     secrets:
       CODEX_OPENAI_API_KEY: ${{{{ secrets.CODEX_OPENAI_API_KEY }}}}
       CODEX_GITHUB_APP_PRIVATE_KEY: ${{{{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}}}
+      CODEX_JIRA_PR_NOTIFY_URL: ${{{{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}}}
       CODEX_SONAR_TOKEN: ${{{{ secrets.CODEX_SONAR_TOKEN }}}}
 """
 
 
 class UpdateCallerWorkflowTests(unittest.TestCase):
-    def test_adds_notify_secret_and_updates_dispatch_pin(self):
+    def test_updates_dispatch_pin_with_exact_secret_set(self):
         updated = MODULE.update_caller(
             dispatch_caller(), "codex_jira_dispatch.yml", NEW_SHA
         )
         self.assertIn(f"codex-implement.yml@{NEW_SHA}", updated)
         self.assertEqual(updated.count("CODEX_JIRA_PR_NOTIFY_URL"), 2)
 
-    def test_adds_notify_secret_and_updates_review_pin(self):
+    def test_updates_safe_review_pin_with_exact_secret_set(self):
         updated = MODULE.update_caller(
             review_caller(), "codex_pr_review.yml", NEW_SHA
         )
@@ -111,6 +116,63 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
 
         with self.assertRaisesRegex(MODULE.CallerContractError, "missing with: block"):
             MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+
+    def test_rejects_missing_required_secret(self):
+        with self.assertRaisesRegex(
+            MODULE.CallerContractError,
+            "missing required secrets: CODEX_JIRA_PR_NOTIFY_URL",
+        ):
+            MODULE.update_caller(
+                dispatch_caller(include_notify=False),
+                "codex_jira_dispatch.yml",
+                NEW_SHA,
+            )
+
+    def test_rejects_one_or_multiple_extra_secrets(self):
+        for extras in (
+            ["EXTRA_TOKEN"],
+            ["ANOTHER_TOKEN", "EXTRA_TOKEN"],
+        ):
+            with self.subTest(extras=extras):
+                extra_lines = "".join(
+                    f"      {name}: ${{{{ secrets.{name} }}}}\n" for name in extras
+                )
+                caller = dispatch_caller().replace(
+                    "      CODEX_SONAR_TOKEN:",
+                    extra_lines + "      CODEX_SONAR_TOKEN:",
+                )
+                with self.assertRaisesRegex(
+                    MODULE.CallerContractError,
+                    "caller supplies unsupported secrets: " + ", ".join(extras),
+                ):
+                    MODULE.update_caller(
+                        caller, "codex_jira_dispatch.yml", NEW_SHA
+                    )
+
+    def test_review_caller_requires_safe_issue_comment_gate(self):
+        mutations = {
+            "event": review_caller().replace(
+                "issue_comment:\n    types: [created]",
+                "pull_request_review:\n    types: [submitted]",
+            ),
+            "command": review_caller().replace(
+                "comment.body == '/codex-review'",
+                "contains(comment.body, '/codex-review')",
+            ),
+            "association": review_caller().replace(
+                '["COLLABORATOR","MEMBER","OWNER"]',
+                '["CONTRIBUTOR","OWNER"]',
+            ),
+        }
+        for case, caller in mutations.items():
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(
+                    MODULE.CallerContractError,
+                    "review caller",
+                ):
+                    MODULE.update_caller(
+                        caller, "codex_pr_review.yml", NEW_SHA
+                    )
 
     def test_does_not_borrow_secrets_block_from_later_job(self):
         caller = dispatch_caller().replace("    secrets:\n", "    configuration-secrets:\n", 1)

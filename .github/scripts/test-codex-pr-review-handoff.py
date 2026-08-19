@@ -77,6 +77,17 @@ class CodexPrReviewHandoffTest(unittest.TestCase):
             )
             fake_gh.chmod(0o755)
 
+            fake_git = fake_bin / "git"
+            fake_git.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "if [[ \"$*\" == *'ls-remote'*'refs/heads/master'* ]]; then\n"
+                f"  printf '%s\\trefs/heads/master\\n' {'b' * 40!r}\n"
+                "fi\n",
+                encoding="utf-8",
+            )
+            fake_git.chmod(0o755)
+
             publisher_environment = {
                 **os.environ,
                 "PATH": f"{fake_bin}:{os.environ['PATH']}",
@@ -89,6 +100,8 @@ class CodexPrReviewHandoffTest(unittest.TestCase):
                 "EXPECTED_PR_NUMBER": "42",
                 "EXPECTED_HEAD_REF": "codex/example",
                 "EXPECTED_HEAD_SHA": "a" * 40,
+                "DEFAULT_BRANCH": "master",
+                "EXPECTED_DEFAULT_SHA": "b" * 40,
                 "RUNNER_TEMP": str(root / "runner-temp"),
             }
             published = subprocess.run(

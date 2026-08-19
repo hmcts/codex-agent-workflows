@@ -35,11 +35,7 @@ PROTECTED_EVENT_FILTERS = {
   "create" => [],
   "status" => [],
 }.freeze
-TRUSTED_REVIEW_EVENTS = {
-  "pull_request_review" => ["submitted"],
-  "pull_request_review_comment" => ["created"],
-  "issue_comment" => ["created"],
-}.freeze
+TRUSTED_REVIEW_IF = "${{ github.event.issue.pull_request && github.event.comment.body == '/codex-review' && contains(fromJSON('[\"COLLABORATOR\",\"MEMBER\",\"OWNER\"]'), github.event.comment.author_association) }}"
 TRUSTED_REVIEW_INPUTS = %w[
   runner_label
   node_version
@@ -736,16 +732,9 @@ end
 def trusted_review_contract!(analysis)
   workflow = analysis.entry.workflow
   events = analysis.events
-  unless !events.empty? && (events.keys - TRUSTED_REVIEW_EVENTS.keys).empty?
+  unless events == {"issue_comment" => {"types" => ["created"]}}
     raise WorkflowSafetyError,
-          "trusted review dispatch may use only issue_comment, pull_request_review and pull_request_review_comment"
-  end
-  events.each do |event, configuration|
-    expected = {"types" => TRUSTED_REVIEW_EVENTS.fetch(event)}
-    unless configuration == expected
-      raise WorkflowSafetyError,
-            "on.#{event} must use exactly types: [#{TRUSTED_REVIEW_EVENTS.fetch(event).join(', ')}] for trusted review dispatch"
-    end
+          "trusted review dispatch must use only on.issue_comment with exactly types: [created]"
   end
 
   top_level = workflow.reject { |key, _value| key == "jobs" }
@@ -764,6 +753,10 @@ def trusted_review_contract!(analysis)
 
   job_name, job = workflow["jobs"].first
   location = "jobs.#{job_name}"
+  unless job["if"] == TRUSTED_REVIEW_IF
+    raise WorkflowSafetyError,
+          "#{location}.if must use the exact command and author-association gate for /codex-review on a PR comment"
+  end
   if job.key?("environment")
     raise WorkflowSafetyError, "#{location}.environment can expose environment-backed credentials"
   end

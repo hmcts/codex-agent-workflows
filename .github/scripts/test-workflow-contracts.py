@@ -141,7 +141,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("cannot be materialized and parsed", content)
         self.assertIn("complete listener graph", content)
         self.assertIn("listener cycles fail closed", content)
-        self.assertIn("only credential-bearing review-event exception", content)
+        self.assertIn("only credential-bearing automatic-event exception", content)
+        self.assertIn("only `issue_comment` with exactly `types: [created]`", content)
+        self.assertIn("`pull_request_review` and `pull_request_review_comment` are not accepted", content)
+        self.assertIn("whose `author_association` is exactly one of", content)
         self.assertIn("same reviewed 40-character SHA", content)
         self.assertIn("exactly `https://sonarcloud.io`", content)
         self.assertIn("cannot contain executable steps", content)
@@ -248,6 +251,65 @@ class WorkflowContractTests(unittest.TestCase):
                     '--trusted-repository-root "$GITHUB_WORKSPACE"', job
                 )
 
+    def test_review_publication_revalidates_fresh_default_before_push(self):
+        content = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+        for job_name in (
+            "codex-review-publish",
+            "codex-review-external-republish",
+        ):
+            start = content.index(f"  {job_name}:")
+            next_job = re.search(
+                r"(?m)^  [A-Za-z0-9_-]+:\s*$", content[start + 3 :]
+            )
+            end = start + 3 + next_job.start() if next_job else len(content)
+            job = content[start:end]
+            fresh_checkout = job.index("Checkout current default branch")
+            current_revision = job.index("Resolve current default revision")
+            policy_gate = job.index("check-codex-pr-safety.rb")
+            token = job.index("actions/create-github-app-token@")
+            publish = job.index("codex-pr-review-publish.sh")
+            self.assertLess(fresh_checkout, current_revision)
+            self.assertLess(current_revision, policy_gate)
+            self.assertLess(policy_gate, token)
+            self.assertLess(token, publish)
+            self.assertIn("ref: ${{ env.DEFAULT_BRANCH }}", job)
+            self.assertIn(
+                "EXPECTED_DEFAULT_SHA: ${{ steps.current-default.outputs.sha }}",
+                job,
+            )
+
+        publisher = (ROOT / "scripts" / "codex-pr-review-publish.sh").read_text(
+            encoding="utf-8"
+        )
+        prepared_commit = publisher.index('commit_sha="$(git_local rev-parse HEAD)"')
+        final_default_check = publisher.index(
+            "\nverify_default_unchanged\n", prepared_commit
+        )
+        push = publisher.index("git_authenticated push", prepared_commit)
+        self.assertLess(prepared_commit, final_default_check)
+        self.assertLess(final_default_check, push)
+        self.assertIn("Default branch unavailable", publisher)
+        self.assertIn("Default branch moved", publisher)
+
+    def test_review_reusable_workflow_accepts_only_safe_issue_comments(self):
+        content = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+        start = content.index("  detect-codex-pr:")
+        end = content.index("\n  codex-review-generate-action:", start)
+        job = content[start:end]
+        self.assertIn('case "$GITHUB_EVENT_NAME" in', job)
+        self.assertIn("            issue_comment)", job)
+        self.assertNotIn("pull_request_review", job)
+        self.assertIn('if [[ "$body" != "/codex-review" ]]', job)
+        self.assertIn("COLLABORATOR|MEMBER|OWNER", job)
+        self.assertIn("actor_permission", job)
+        preparation = (ROOT / "scripts" / "codex-pr-review-feedback.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn('event_name == "pull_request_review"', preparation)
+        self.assertNotIn('event_name == "pull_request_review_comment"', preparation)
+        self.assertIn("no actionable trusted review feedback was found", preparation)
+        self.assertIn("comments_by_review", preparation)
+
     def test_verifiers_gate_applied_patch_with_trusted_checker(self):
         for name in ("codex-jira-verify.sh", "codex-pr-review-verify.sh"):
             content = (ROOT / "scripts" / name).read_text(encoding="utf-8")
@@ -328,6 +390,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_release_updater_validates_before_branch_mutation_and_resets_stale_branch(self):
         content = UPDATER_WORKFLOW.read_text(encoding="utf-8")
         validation = content.index("?ref=${TARGET_BRANCH}")
+        contract_validation = content.index("update-caller-workflow.py")
         branch_create = content.index(
             'gh api --method POST "repos/${TARGET_REPOSITORY}/git/refs"'
         )
@@ -336,6 +399,9 @@ class WorkflowContractTests(unittest.TestCase):
             'gh api --method PATCH "repos/${TARGET_REPOSITORY}/git/refs/heads/${branch}"'
         )
         self.assertLess(validation, open_pr)
+        self.assertLess(contract_validation, open_pr)
+        self.assertLess(contract_validation, stale_reset)
+        self.assertLess(contract_validation, branch_create)
         self.assertLess(open_pr, stale_reset)
         self.assertLess(stale_reset, branch_create)
         self.assertIn("-F force=true", content)

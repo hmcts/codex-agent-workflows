@@ -31,10 +31,6 @@ def trusted_review_wrapper(
     pin = pin or "1" * 40
     return f"""name: Codex PR Review
 on:
-  pull_request_review:
-    types: [submitted]
-  pull_request_review_comment:
-    types: [created]
   issue_comment:
     types: [created]
 permissions:
@@ -43,6 +39,7 @@ permissions:
   issues: read
 jobs:
   review:
+    if: ${{{{ github.event.issue.pull_request && github.event.comment.body == '/codex-review' && contains(fromJSON('["COLLABORATOR","MEMBER","OWNER"]'), github.event.comment.author_association) }}}}
     permissions:
       contents: read
       pull-requests: read
@@ -891,7 +888,13 @@ jobs:
                 f"@{'1' * 40}", "@main", 1
             ),
             "exactly types": trusted_review_wrapper().replace(
-                "types: [submitted]", "types: [submitted, edited]", 1
+                "types: [created]", "types: [created, edited]", 1
+            ),
+            "exact command": trusted_review_wrapper().replace(
+                "comment.body == '/codex-review'", "contains(comment.body, '/codex-review')", 1
+            ),
+            "author-association": trusted_review_wrapper().replace(
+                '["COLLABORATOR","MEMBER","OWNER"]', '["CONTRIBUTOR","OWNER"]', 1
             ),
             "must not execute steps": trusted_review_wrapper().replace(
                 "    with:\n", "    steps: []\n    with:\n", 1
@@ -909,6 +912,23 @@ jobs:
                     content,
                     diagnostic,
                     filename="codex_pr_review.yml",
+                )
+
+    def test_trusted_review_wrapper_rejects_review_event_roots(self):
+        trusted = {"codex_pr_review.yml": trusted_review_wrapper()}
+        for event, trigger in {
+            "review": "on:\n  pull_request_review:\n    types: [submitted]",
+            "review comment": "on:\n  pull_request_review_comment:\n    types: [created]",
+        }.items():
+            with self.subTest(event=event):
+                candidate = trusted_review_wrapper().replace(
+                    "on:\n  issue_comment:\n    types: [created]", trigger
+                )
+                self.assert_workflows_blocked(
+                    {"codex_pr_review.yml": candidate},
+                    "must use only on.issue_comment",
+                    filename="codex_pr_review.yml",
+                    trusted_workflows=trusted,
                 )
 
     def test_trusted_review_sonar_origin_is_exact_and_not_expression_driven(self):

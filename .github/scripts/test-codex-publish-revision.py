@@ -366,6 +366,7 @@ esac
         self,
         remote_head: str,
         *,
+        remote_base: str = BASE_SHA,
         fail_pr_comment: bool = False,
         remote_parent: str = BASE_SHA,
         remote_tree: str = LOCAL_TREE_SHA,
@@ -375,7 +376,7 @@ esac
             output, verified = self.write_patch_artifacts(root, kind="review")
             fake_bin, command_log = self.make_fake_tools(
                 root,
-                remote_base=BASE_SHA,
+                remote_base=remote_base,
                 remote_head=remote_head,
                 fail_pr_comment=fail_pr_comment,
                 remote_parent=remote_parent,
@@ -397,6 +398,8 @@ esac
                     "EXPECTED_PR_NUMBER": "42",
                     "EXPECTED_HEAD_REF": "codex/example",
                     "EXPECTED_HEAD_SHA": HEAD_SHA,
+                    "DEFAULT_BRANCH": "master",
+                    "EXPECTED_DEFAULT_SHA": BASE_SHA,
                     "RUNNER_TEMP": str(root / "runner"),
                     "GITHUB_OUTPUT": str(github_output),
                 },
@@ -577,6 +580,22 @@ esac
         completed, _ = self.run_review(MOVED_SHA)
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("Existing review branch mismatch", completed.stderr)
+
+    def test_review_publisher_rejects_moved_or_unavailable_default_before_push(self) -> None:
+        for case, remote_base in {
+            "moved": MOVED_SHA,
+            "unavailable": "",
+        }.items():
+            with self.subTest(case=case):
+                completed, commands, _, _ = self.run_review_with_outputs(
+                    HEAD_SHA,
+                    remote_base=remote_base,
+                )
+
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("Default branch", completed.stderr)
+                self.assert_command_logged(commands, "commit")
+                self.assert_no_push(commands)
 
     def test_review_publisher_recovers_exact_previously_pushed_commit(self) -> None:
         completed, commands, outputs, comment = self.run_review_with_outputs(

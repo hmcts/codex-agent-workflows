@@ -23,6 +23,7 @@ artifact_dir="${RUNNER_TEMP:-/tmp}/codex-review-generate-${run_id}-${run_attempt
 output_dir="${OUTPUT_DIR}"
 feedback_env_path="${artifact_dir}/feedback.env"
 pr_json_path="${artifact_dir}/pull-request.json"
+reviews_json_path="${artifact_dir}/reviews.json"
 review_comments_json_path="${artifact_dir}/review-comments.json"
 prompt_path="${artifact_dir}/codex-review-feedback-prompt.md"
 final_message_path="${output_dir}/codex-final-message.md"
@@ -131,6 +132,7 @@ feedback = {
     "PR_NUMBER": "",
     "COMMENT_KIND": event_name,
     "COMMENT_AUTHOR": "",
+    "COMMENT_AUTHOR_ASSOCIATION": "",
     "COMMENT_BODY": "",
     "COMMENT_URL": "",
     "COMMENT_PATH": "",
@@ -140,33 +142,7 @@ feedback = {
     "REVIEW_COMMENTS": "",
 }
 
-if event_name == "pull_request_review":
-    review = event["review"]
-    feedback.update(
-        {
-            "PR_NUMBER": str(event["pull_request"]["number"]),
-            "COMMENT_AUTHOR": review.get("user", {}).get("login", ""),
-            "COMMENT_BODY": (review.get("body") or "").strip(),
-            "COMMENT_URL": review.get("html_url") or "",
-            "REVIEW_STATE": review.get("state") or "",
-            "REVIEW_ID": str(review.get("id") or ""),
-        }
-    )
-    if feedback["REVIEW_STATE"].lower() == "approved":
-        feedback["SKIP_REASON"] = "review was approved"
-elif event_name == "pull_request_review_comment":
-    comment = event["comment"]
-    feedback.update(
-        {
-            "PR_NUMBER": str(event["pull_request"]["number"]),
-            "COMMENT_AUTHOR": comment.get("user", {}).get("login", ""),
-            "COMMENT_BODY": (comment.get("body") or "").strip(),
-            "COMMENT_URL": comment.get("html_url") or "",
-            "COMMENT_PATH": comment.get("path") or "",
-            "COMMENT_DIFF_HUNK": comment.get("diff_hunk") or "",
-        }
-    )
-elif event_name == "issue_comment":
+if event_name == "issue_comment":
     if "pull_request" not in event.get("issue", {}):
         feedback["SKIP_REASON"] = "comment is not on a pull request"
     comment = event["comment"]
@@ -174,6 +150,7 @@ elif event_name == "issue_comment":
         {
             "PR_NUMBER": str(event.get("issue", {}).get("number", "")),
             "COMMENT_AUTHOR": comment.get("user", {}).get("login", ""),
+            "COMMENT_AUTHOR_ASSOCIATION": comment.get("author_association") or "",
             "COMMENT_BODY": (comment.get("body") or "").strip(),
             "COMMENT_URL": comment.get("html_url") or "",
         }
@@ -183,6 +160,10 @@ else:
 
 if feedback["COMMENT_AUTHOR"] in {"github-actions[bot]", "app/github-actions"}:
     feedback["SKIP_REASON"] = "ignoring GitHub Actions bot comment"
+if feedback["COMMENT_BODY"] != "/codex-review":
+    feedback["SKIP_REASON"] = "comment body is not the exact /codex-review command"
+if feedback["COMMENT_AUTHOR_ASSOCIATION"] not in {"COLLABORATOR", "MEMBER", "OWNER"}:
+    feedback["SKIP_REASON"] = "comment author association is not trusted"
 
 for key, value in feedback.items():
     print(f"{key}={shlex.quote(value)}")
@@ -197,19 +178,50 @@ if [[ -n "${SKIP_REASON}" ]]; then
   skip_codex_action "${SKIP_REASON}"
 fi
 
-if [[ "${COMMENT_KIND}" == "pull_request_review" && -n "${REVIEW_ID}" ]]; then
-  gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}/comments" >"${review_comments_json_path}"
+gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews?per_page=100" >"${reviews_json_path}"
+gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/comments?per_page=100" >"${review_comments_json_path}"
 
-  REVIEW_COMMENTS_JSON_PATH="${review_comments_json_path}" python3 - <<'PY' >>"${feedback_env_path}"
+REVIEWS_JSON_PATH="${reviews_json_path}" REVIEW_COMMENTS_JSON_PATH="${review_comments_json_path}" python3 - <<'PY' >>"${feedback_env_path}"
 import json
 import os
 import shlex
 
+with open(os.environ["REVIEWS_JSON_PATH"], encoding="utf-8") as reviews_file:
+    reviews = json.load(reviews_file)
 with open(os.environ["REVIEW_COMMENTS_JSON_PATH"], encoding="utf-8") as comments_file:
     review_comments = json.load(comments_file)
 
+comments_by_review = {}
+for comment in review_comments:
+    review_id = comment.get("pull_request_review_id")
+    if review_id is not None:
+        comments_by_review.setdefault(review_id, []).append(comment)
+
+actionable_reviews = []
+for review in reviews:
+    review_id = review.get("id")
+    state = (review.get("state") or "").upper()
+    association = review.get("author_association") or ""
+    body = (review.get("body") or "").strip()
+    comments = comments_by_review.get(review_id, [])
+    if (
+        state in {"CHANGES_REQUESTED", "COMMENTED"}
+        and association in {"COLLABORATOR", "MEMBER", "OWNER"}
+        and (body or comments)
+    ):
+        actionable_reviews.append(review)
+
+if not actionable_reviews:
+    print(f"SKIP_REASON={shlex.quote('no actionable trusted review feedback was found')}")
+    raise SystemExit
+
+review = max(
+    actionable_reviews,
+    key=lambda item: (item.get("submitted_at") or "", item.get("id") or 0),
+)
+review_id = review.get("id")
 formatted_comments = []
-for index, comment in enumerate(review_comments, start=1):
+for index, comment in enumerate(comments_by_review.get(review_id, []), start=1):
     path = (comment.get("path") or "").strip()
     url = (comment.get("html_url") or "").strip()
     diff_hunk = (comment.get("diff_hunk") or "").strip()
@@ -227,13 +239,26 @@ for index, comment in enumerate(review_comments, start=1):
 
     formatted_comments.append("\n".join(parts))
 
-print(f"REVIEW_COMMENTS={shlex.quote(chr(10).join(formatted_comments))}")
+values = {
+    "COMMENT_KIND": "pull_request_review",
+    "COMMENT_AUTHOR": review.get("user", {}).get("login", ""),
+    "COMMENT_BODY": (review.get("body") or "").strip(),
+    "COMMENT_URL": review.get("html_url") or "",
+    "REVIEW_STATE": review.get("state") or "",
+    "REVIEW_ID": str(review_id or ""),
+    "REVIEW_COMMENTS": "\n".join(formatted_comments),
+}
+for key, value in values.items():
+    print(f"{key}={shlex.quote(value)}")
 PY
 
-  set -a
-  # shellcheck disable=SC1090
-  source "${feedback_env_path}"
-  set +a
+set -a
+# shellcheck disable=SC1090
+source "${feedback_env_path}"
+set +a
+
+if [[ -n "${SKIP_REASON}" ]]; then
+  skip_codex_action "${SKIP_REASON}"
 fi
 
 if [[ -z "${COMMENT_BODY}${REVIEW_COMMENTS}" ]]; then

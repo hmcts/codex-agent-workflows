@@ -50,6 +50,12 @@ REQUIRED_SECRETS = (
     "CODEX_JIRA_PR_NOTIFY_URL",
     "CODEX_SONAR_TOKEN",
 )
+REVIEW_JOB_IF = (
+    "${{ github.event.issue.pull_request && "
+    "github.event.comment.body == '/codex-review' && "
+    "contains(fromJSON('[\"COLLABORATOR\",\"MEMBER\",\"OWNER\"]'), "
+    "github.event.comment.author_association) }}"
+)
 
 
 class CallerContractError(ValueError):
@@ -110,15 +116,67 @@ def _mapping_keys(lines: list[str], start: int, end: int, indent: int) -> set[st
     return keys
 
 
-def _mapping_values(lines: list[str], start: int, end: int, indent: int) -> dict[str, str]:
+def _strict_secret_values(
+    lines: list[str], start: int, end: int, indent: int
+) -> dict[str, str]:
     values: dict[str, str] = {}
     item_indent = indent + 2
     pattern = re.compile(rf"^\s{{{item_indent}}}([A-Za-z0-9_]+):\s*(.*?)\s*$")
     for line in lines[start + 1 : end]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
         match = pattern.match(line.rstrip("\n"))
-        if match:
-            values[match.group(1)] = match.group(2)
+        if not match:
+            raise CallerContractError(
+                "caller secrets block contains unsupported mapping syntax"
+            )
+        name = match.group(1)
+        if name in values:
+            raise CallerContractError(f"caller supplies duplicate secret: {name}")
+        values[name] = match.group(2)
     return values
+
+
+def _validate_review_event_contract(
+    lines: list[str], job_start: int, job_end: int, job_indent: int
+) -> None:
+    trigger_starts = [
+        index for index, line in enumerate(lines) if re.match(r"^on:\s*$", line)
+    ]
+    if len(trigger_starts) != 1:
+        raise CallerContractError(
+            "review caller must contain exactly one top-level on: block"
+        )
+
+    trigger_start = trigger_starts[0]
+    trigger_end = trigger_start + 1
+    while trigger_end < len(lines):
+        line = lines[trigger_end]
+        if line.strip() and len(line) - len(line.lstrip()) == 0:
+            break
+        trigger_end += 1
+    trigger_lines = [
+        line.rstrip()
+        for line in lines[trigger_start:trigger_end]
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if trigger_lines != ["on:", "  issue_comment:", "    types: [created]"]:
+        raise CallerContractError(
+            "review caller must use only on.issue_comment with exactly types: [created]"
+        )
+
+    condition_pattern = re.compile(
+        rf"^\s{{{job_indent + 2}}}if:\s*(.*?)\s*$"
+    )
+    conditions = [
+        match.group(1)
+        for line in lines[job_start + 1 : job_end]
+        if (match := condition_pattern.match(line.rstrip("\n")))
+    ]
+    if conditions != [REVIEW_JOB_IF]:
+        raise CallerContractError(
+            "review caller job must use the exact /codex-review command and author-association gate"
+        )
 
 
 def update_caller(content: str, filename: str, release_sha: str) -> str:
@@ -137,15 +195,13 @@ def update_caller(content: str, filename: str, release_sha: str) -> str:
             f"{filename} must call {contract['shared_workflow']}"
         )
 
-    updated = (
-        content[: matches[0].start("sha")]
-        + release_sha
-        + content[matches[0].end("sha") :]
-    )
-    lines = updated.splitlines(keepends=True)
-    uses_line = updated[: matches[0].start()].count("\n")
+    lines = content.splitlines(keepends=True)
+    uses_line = content[: matches[0].start()].count("\n")
     uses_indent = len(matches[0].group("indent"))
-    _job_start, job_end = _job_bounds(lines, uses_line, uses_indent)
+    job_start, job_end = _job_bounds(lines, uses_line, uses_indent)
+
+    if filename == "codex_pr_review.yml":
+        _validate_review_event_contract(lines, job_start, job_end, uses_indent - 2)
 
     with_start, with_end, with_indent = _block_bounds(
         lines, "with", uses_line, job_end, uses_indent
@@ -160,32 +216,19 @@ def update_caller(content: str, filename: str, release_sha: str) -> str:
     secrets_start, secrets_end, secrets_indent = _block_bounds(
         lines, "secrets", uses_line, job_end, uses_indent
     )
-    secret_values = _mapping_values(lines, secrets_start, secrets_end, secrets_indent)
+    secret_values = _strict_secret_values(
+        lines, secrets_start, secrets_end, secrets_indent
+    )
     present_secrets = set(secret_values)
-    unknown_missing = [
-        secret
-        for secret in REQUIRED_SECRETS
-        if secret not in present_secrets and secret != "CODEX_JIRA_PR_NOTIFY_URL"
-    ]
-    if unknown_missing:
+    extra_secrets = sorted(present_secrets - set(REQUIRED_SECRETS))
+    if extra_secrets:
         raise CallerContractError(
-            "caller is missing required secrets: " + ", ".join(unknown_missing)
+            "caller supplies unsupported secrets: " + ", ".join(extra_secrets)
         )
-
-    if "CODEX_JIRA_PR_NOTIFY_URL" not in present_secrets:
-        item_indent = " " * (secrets_indent + 2)
-        insertion = (
-            f"{item_indent}CODEX_JIRA_PR_NOTIFY_URL: "
-            "${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}\n"
-        )
-        sonar_line = None
-        for index in range(secrets_start + 1, secrets_end):
-            if re.match(r"^\s*CODEX_SONAR_TOKEN:", lines[index]):
-                sonar_line = index
-                break
-        lines.insert(sonar_line if sonar_line is not None else secrets_end, insertion)
-        secret_values["CODEX_JIRA_PR_NOTIFY_URL"] = (
-            "${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}"
+    missing_secrets = sorted(set(REQUIRED_SECRETS) - present_secrets)
+    if missing_secrets:
+        raise CallerContractError(
+            "caller is missing required secrets: " + ", ".join(missing_secrets)
         )
 
     for secret in REQUIRED_SECRETS:
@@ -195,7 +238,12 @@ def update_caller(content: str, filename: str, release_sha: str) -> str:
                 f"caller secret {secret} must map exactly to {expected_mapping}"
             )
 
-    migrated = "".join(lines)
+    validated = "".join(lines)
+    migrated = (
+        validated[: matches[0].start("sha")]
+        + release_sha
+        + validated[matches[0].end("sha") :]
+    )
     if not migrated.endswith("\n"):
         migrated += "\n"
     return migrated

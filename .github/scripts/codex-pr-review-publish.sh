@@ -20,6 +20,8 @@ required_env "VERIFICATION_DIR"
 required_env "EXPECTED_PR_NUMBER"
 required_env "EXPECTED_HEAD_REF"
 required_env "EXPECTED_HEAD_SHA"
+required_env "DEFAULT_BRANCH"
+required_env "EXPECTED_DEFAULT_SHA"
 
 output_dir="${OUTPUT_DIR}"
 publisher_login="${BOT_PUBLISHER_LOGIN}"
@@ -119,6 +121,25 @@ persist_output() {
   fi
 }
 
+verify_default_unchanged() {
+  local remote_ref
+  local current_default_sha
+
+  if [[ ! "${EXPECTED_DEFAULT_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Invalid expected default-branch SHA: ${EXPECTED_DEFAULT_SHA}" >&2
+    exit 1
+  fi
+  if ! remote_ref="$(git_authenticated ls-remote --exit-code --heads origin "refs/heads/${DEFAULT_BRANCH}")"; then
+    echo "::error title=Default branch unavailable::The current ${DEFAULT_BRANCH} revision could not be resolved before review publication." >&2
+    exit 1
+  fi
+  current_default_sha="$(awk '{print $1}' <<<"${remote_ref}")"
+  if [[ ! "${current_default_sha}" =~ ^[0-9a-f]{40}$ || "${current_default_sha}" != "${EXPECTED_DEFAULT_SHA}" ]]; then
+    echo "::error title=Default branch moved::The ${DEFAULT_BRANCH} workflow tree changed before review publication." >&2
+    exit 1
+  fi
+}
+
 mkdir -p "${sanitized_home}" "${sanitized_tmp}"
 
 has_changes="$(metadata_value has_changes)"
@@ -143,6 +164,7 @@ if [[ "${has_changes}" != "true" ]]; then
     echo "Refusing to publish unverified no-change review result." >&2
     exit 1
   fi
+  verify_default_unchanged
   persist_output pr_number "${pr_number}"
   persist_output branch_name "${head_ref}"
   if [[ -s "${verified_comment_path}" ]]; then
@@ -200,6 +222,7 @@ commit_sha="$(git_local rev-parse HEAD)"
 local_tree_sha="$(git_local rev-parse 'HEAD^{tree}')"
 
 latest_head_sha="$(git_authenticated ls-remote --heads origin "refs/heads/${head_ref}" | awk '{print $1}')"
+verify_default_unchanged
 if [[ "${remote_head_sha}" == "${verified_head_sha}" ]]; then
   if [[ "${latest_head_sha}" != "${verified_head_sha}" ]]; then
     echo "::error title=PR branch moved::The remote ${head_ref} branch moved while the verified feedback commit was being prepared." >&2
@@ -216,6 +239,7 @@ elif [[ "${latest_head_sha}" == "${remote_head_sha}" ]]; then
     echo "::error title=Existing review branch mismatch::The remote ${head_ref} branch does not have the exact verified head and generated feedback tree. Refusing to recover publication." >&2
     exit 1
   fi
+  verify_default_unchanged
   commit_sha="${remote_head_sha}"
   echo "Recovered exact previously pushed review-feedback commit ${commit_sha}."
 else

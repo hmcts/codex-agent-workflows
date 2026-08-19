@@ -86,8 +86,8 @@ jobs:
           head_repo=""
           body=""
           actor_login=""
+          actor_association=""
           actor_permission=""
-          review_state=""
 
           write_skip() {
             local reason="$1"
@@ -100,19 +100,6 @@ jobs:
           }
 
           case "$GITHUB_EVENT_NAME" in
-            pull_request_review|pull_request_review_comment)
-              pr_number="$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")"
-              head_ref="$(jq -r '.pull_request.head.ref' "$GITHUB_EVENT_PATH")"
-              head_repo="$(jq -r '.pull_request.head.repo.full_name' "$GITHUB_EVENT_PATH")"
-              if [[ "$GITHUB_EVENT_NAME" == "pull_request_review" ]]; then
-                body="$(jq -r '.review.body // ""' "$GITHUB_EVENT_PATH")"
-                actor_login="$(jq -r '.review.user.login // ""' "$GITHUB_EVENT_PATH")"
-                review_state="$(jq -r '.review.state // ""' "$GITHUB_EVENT_PATH")"
-              else
-                body="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
-                actor_login="$(jq -r '.comment.user.login // ""' "$GITHUB_EVENT_PATH")"
-              fi
-              ;;
             issue_comment)
               is_pr="$(jq -r '.issue | has("pull_request")' "$GITHUB_EVENT_PATH")"
               if [[ "$is_pr" != "true" ]]; then
@@ -125,6 +112,7 @@ jobs:
               head_repo="$(jq -r '.head.repo.full_name' <<<"${pull_request_json}")"
               body="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
               actor_login="$(jq -r '.comment.user.login // ""' "$GITHUB_EVENT_PATH")"
+              actor_association="$(jq -r '.comment.author_association // ""' "$GITHUB_EVENT_PATH")"
               ;;
             *)
               write_skip "unsupported event: ${GITHUB_EVENT_NAME}"
@@ -142,15 +130,19 @@ jobs:
             exit 0
           fi
 
-          if [[ "$review_state" == "approved" ]]; then
-            write_skip "review was approved"
+          if [[ "$body" != "/codex-review" ]]; then
+            write_skip "comment body is not the exact /codex-review command"
             exit 0
           fi
 
-          if ! grep -Eiq '(^|[[:space:]])/(codex-review|codex review)([[:space:]]|$)' <<<"$body"; then
-            write_skip "missing explicit /codex-review command"
-            exit 0
-          fi
+          case "$actor_association" in
+            COLLABORATOR|MEMBER|OWNER)
+              ;;
+            *)
+              write_skip "comment author association is not trusted"
+              exit 0
+              ;;
+          esac
 
           if [[ -z "$actor_login" || "$actor_login" == "null" ]]; then
             write_skip "comment author could not be determined"
@@ -333,12 +325,26 @@ jobs:
       - name: Locate trusted Codex runtime
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@e8817222c5257166a9da4980665dc29bd4bcbcfe
 
-      - name: Checkout default branch
+      - name: Checkout current default branch
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.codex-review-generate.outputs.trusted_sha }}
+          ref: ${{ env.DEFAULT_BRANCH }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Resolve current default revision
+        id: current-default
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          checkout_sha="$(git rev-parse HEAD)"
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${DEFAULT_BRANCH}" --jq '.object.sha')"
+          if [[ ! "${current_sha}" =~ ^[0-9a-f]{40}$ || "${checkout_sha}" != "${current_sha}" ]]; then
+            echo "::error title=Default branch moved::The current default workflow tree could not be prepared at a stable revision."
+            exit 1
+          fi
+          echo "sha=${current_sha}" >>"$GITHUB_OUTPUT"
 
       - name: Checkout candidate policy base
         uses: actions/checkout@v7
@@ -407,6 +413,7 @@ jobs:
           BOT_PUBLISHER_EMAIL: ${{ steps.publisher.outputs.publisher_email }}
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           VERIFICATION_DIR: ${{ runner.temp }}/codex-verified
+          EXPECTED_DEFAULT_SHA: ${{ steps.current-default.outputs.sha }}
         run: "$RUNNER_TEMP/codex-pr-review-publish.sh"
 
       - name: Write workflow summary
@@ -824,6 +831,7 @@ jobs:
       pr_number: ${{ steps.publish.outputs.pr_number }}
       commit_sha: ${{ steps.publish.outputs.commit_sha }}
     env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       EXPECTED_PR_NUMBER: ${{ needs.codex-review-generate-action.outputs.pr_number }}
       EXPECTED_HEAD_REF: ${{ needs.codex-review-generate-action.outputs.head_ref }}
       EXPECTED_HEAD_SHA: ${{ needs.prepare-published-review-repair-source.outputs.head_sha }}
@@ -836,12 +844,26 @@ jobs:
       - name: Locate trusted Codex runtime
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@e8817222c5257166a9da4980665dc29bd4bcbcfe
 
-      - name: Checkout trusted publisher
+      - name: Checkout current default branch
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.codex-review-generate.outputs.trusted_sha }}
+          ref: ${{ env.DEFAULT_BRANCH }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Resolve current default revision
+        id: current-default
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          checkout_sha="$(git rev-parse HEAD)"
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${DEFAULT_BRANCH}" --jq '.object.sha')"
+          if [[ ! "${current_sha}" =~ ^[0-9a-f]{40}$ || "${checkout_sha}" != "${current_sha}" ]]; then
+            echo "::error title=Default branch moved::The current default workflow tree could not be prepared at a stable revision."
+            exit 1
+          fi
+          echo "sha=${current_sha}" >>"$GITHUB_OUTPUT"
 
       - name: Checkout candidate policy base
         uses: actions/checkout@v7
@@ -910,6 +932,7 @@ jobs:
           BOT_PUBLISHER_EMAIL: ${{ steps.publisher.outputs.publisher_email }}
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           VERIFICATION_DIR: ${{ runner.temp }}/codex-verified
+          EXPECTED_DEFAULT_SHA: ${{ steps.current-default.outputs.sha }}
         run: "$RUNNER_TEMP/codex-pr-review-publish.sh"
 
   verify-review-status-repair:
