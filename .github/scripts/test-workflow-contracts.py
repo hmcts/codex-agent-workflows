@@ -30,6 +30,7 @@ class WorkflowContractTests(unittest.TestCase):
         for path in (
             ".github/scripts/check-codex-pr-safety.rb",
             ".github/scripts/codex-prepare-policy-candidate.sh",
+            ".github/scripts/codex-recover-pr-state.py",
             ".github/scripts/codex-review-feedback-data.py",
         ):
             completed = subprocess.run(
