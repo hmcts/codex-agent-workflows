@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,32 @@ ROLLOUT = ROOT.parent / "docs" / "juror-rollout.md"
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_immutable_runtime_pin_packages_policy_preparer(self):
+        pins = set()
+        pattern = re.compile(
+            r"hmcts/codex-agent-workflows/\.github/actions/runtime@([0-9a-f]{40})"
+        )
+        for workflow in (IMPLEMENT_WORKFLOW, REVIEW_WORKFLOW):
+            pins.update(pattern.findall(workflow.read_text(encoding="utf-8")))
+
+        self.assertEqual(len(pins), 1)
+        pin = pins.pop()
+        for path in (
+            ".github/scripts/check-codex-pr-safety.rb",
+            ".github/scripts/codex-prepare-policy-candidate.sh",
+        ):
+            completed = subprocess.run(
+                ["git", "cat-file", "-e", f"{pin}:{path}"],
+                cwd=ROOT.parent,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                completed.returncode,
+                0,
+                f"immutable runtime {pin} does not package {path}: {completed.stderr}",
+            )
+
     def test_both_reusable_workflows_require_jira_callback_secret(self):
         for workflow in (IMPLEMENT_WORKFLOW, REVIEW_WORKFLOW):
             content = workflow.read_text(encoding="utf-8")
