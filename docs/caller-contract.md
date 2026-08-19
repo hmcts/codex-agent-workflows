@@ -15,6 +15,8 @@ The initiating display name is used only by trusted collection jobs to add trace
 
 Each trusted publisher job mints a short-lived GitHub App installation token restricted to the caller repository. The App bot identity is verified and derived at runtime; no publisher PAT or stored login is required. Secrets are unavailable to generated code and credential-free verification jobs.
 
+Callers must pass `CODEX_JIRA_PR_NOTIFY_URL` to both the implementation and PR-review reusable workflows. Terminal Jenkins, Sonar or credential-free verification failures return the PR to draft, attach the final evidence and notify Jira from a fresh trusted job.
+
 The same App may authenticate Azure Function workflow dispatches, provided it has `Actions: read and write` and is installed on every caller repository. Dispatch tokens are minted separately and restricted to the selected repository.
 
 ## Required repository files

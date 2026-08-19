@@ -109,16 +109,21 @@ fi
 gh_authenticated pr comment "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file "${comment_path}"
 
 if [[ "${NOTIFY_JIRA:-false}" == "true" ]]; then
-  for name in ISSUE_KEY ISSUE_URL; do
-    required_env "${name}"
-  done
+  issue_key="${ISSUE_KEY:-}"
+  issue_url="${ISSUE_URL:-}"
+  if [[ -z "${issue_key}" || -z "${issue_url}" ]]; then
+    jira_metadata="$(
+      printf '%s' "${pr_json}" | python3 -I "${script_dir}/extract-jira-pr-metadata.py"
+    )"
+    IFS=$'\t' read -r issue_key issue_url <<<"${jira_metadata}"
+  fi
   env -i \
     "HOME=${sanitized_home}" \
     "PATH=${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}" \
     "LANG=${LANG:-C.UTF-8}" \
     "LC_ALL=${LC_ALL:-${LANG:-C.UTF-8}}" \
-    "ISSUE_KEY=${ISSUE_KEY}" \
-    "ISSUE_URL=${ISSUE_URL}" \
+    "ISSUE_KEY=${issue_key}" \
+    "ISSUE_URL=${issue_url}" \
     "GITHUB_REPOSITORY=${GITHUB_REPOSITORY}" \
     "GITHUB_RUN_ID=${GITHUB_RUN_ID:-}" \
     "GITHUB_SERVER_URL=${GITHUB_SERVER_URL:-https://github.com}" \

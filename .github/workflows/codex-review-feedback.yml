@@ -39,12 +39,19 @@ on:
         required: false
         default: "2700"
         type: string
+      jira_notify_timeout_seconds:
+        description: Jira callback timeout
+        required: false
+        default: "10"
+        type: string
     secrets:
       CODEX_OPENAI_API_KEY:
         required: true
       CODEX_GITHUB_APP_PRIVATE_KEY:
         required: true
       CODEX_SONAR_TOKEN:
+        required: true
+      CODEX_JIRA_PR_NOTIFY_URL:
         required: true
 
 permissions:
@@ -935,6 +942,8 @@ jobs:
       EXPECTED_HEAD_SHA: ${{ needs.codex-review-external-republish.outputs.commit_sha || needs.codex-review-publish.outputs.commit_sha }}
       FAILURE_ARTIFACT: ${{ needs.verify-review-status-repair.outputs.failure_artifact || needs.codex-review-external-repair-verify.outputs.failure_artifact || needs.verify-review-status.outputs.failure_artifact }}
       FAILURE_MESSAGE: Required Jenkins, Sonar, or credential-free verification failed after the available automated review-feedback repair attempt.
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
     steps:
       - name: Locate trusted Codex runtime
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@9271cb38fdc28fc59d568ce1acaa699eb5b434fb
@@ -969,6 +978,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           FAILURE_DIR: ${{ runner.temp }}/codex-review-terminal-failure
+          NOTIFY_JIRA: "true"
         run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-mark-pr-failed.sh
 
       - name: Fail after bounded external-status repair
