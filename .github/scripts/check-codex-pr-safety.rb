@@ -5,7 +5,13 @@ require "psych"
 require "yaml"
 
 PR_EVENTS = %w[pull_request pull_request_target].freeze
+PUSH_FILTERS = %w[branches branches-ignore paths paths-ignore tags tags-ignore].freeze
 SECRET_EXPRESSION = /\$\{\{.*?\bsecrets\b.*?\}\}/im.freeze
+GITHUB_EXPRESSION = /\$\{\{/.freeze
+GLOB_MAGIC = /[*?\[\]{}+@]/.freeze
+LOCAL_WORKFLOW = %r{\A\./\.github/workflows/([^/]+\.ya?ml)\z}.freeze
+
+WorkflowEntry = Struct.new(:relative_path, :absolute_path, :workflow, keyword_init: true)
 
 class WorkflowSafetyError < StandardError; end
 
@@ -111,22 +117,163 @@ rescue Psych::SyntaxError => error
   raise WorkflowSafetyError, "malformed YAML: #{error.message.lines.first.strip}"
 end
 
-def pull_request_trigger?(trigger)
-  case trigger
-  when String
-    PR_EVENTS.include?(trigger.strip)
-  when Array
-    trigger.any? do |event|
-      unless event.is_a?(String)
-        raise WorkflowSafetyError, "on sequence contains non-string event #{event.inspect}"
-      end
-      PR_EVENTS.include?(event.strip)
+def trigger_events(trigger)
+  raw_events = case trigger
+               when String
+                 [[trigger, nil]]
+               when Array
+                 trigger.map.with_index do |event, index|
+                   unless event.is_a?(String)
+                     raise WorkflowSafetyError, "on[#{index}] contains non-string event #{event.inspect}"
+                   end
+                   [event, nil]
+                 end
+               when Hash
+                 trigger.to_a
+               else
+                 raise WorkflowSafetyError, "top-level on must be a string, sequence or mapping"
+               end
+
+  raw_events.each_with_object({}) do |(raw_event, configuration), events|
+    event = raw_event.strip
+    if event.empty? || event.match?(GITHUB_EXPRESSION)
+      raise WorkflowSafetyError, "top-level on contains a dynamic or empty event name"
     end
-  when Hash
-    trigger.keys.any? { |event| PR_EVENTS.include?(event.strip) }
-  else
-    raise WorkflowSafetyError, "top-level on must be a string, sequence or mapping"
+    if events.key?(event)
+      raise WorkflowSafetyError, "top-level on contains duplicate event #{event.inspect}"
+    end
+    events[event] = configuration
   end
+end
+
+def filter_patterns(configuration, key)
+  return nil unless configuration.key?(key)
+
+  patterns = configuration[key]
+  unless patterns.is_a?(Array) && !patterns.empty?
+    raise WorkflowSafetyError, "on.push.#{key} must be a non-empty sequence"
+  end
+  patterns.map.with_index do |pattern, index|
+    unless pattern.is_a?(String) && !pattern.empty?
+      raise WorkflowSafetyError, "on.push.#{key}[#{index}] must be a non-empty string"
+    end
+    if pattern.match?(GITHUB_EXPRESSION) || pattern.include?("\\")
+      raise WorkflowSafetyError, "on.push.#{key}[#{index}] is dynamic or ambiguous"
+    end
+    pattern
+  end
+end
+
+def pattern_may_match_generated_branch?(pattern)
+  magic_index = pattern.index(GLOB_MAGIC)
+  return pattern.start_with?("codex/") unless magic_index
+
+  literal_prefix = pattern[0...magic_index]
+  literal_prefix.empty? || "codex/".start_with?(literal_prefix) || literal_prefix.start_with?("codex/")
+end
+
+def excludes_every_generated_branch?(pattern)
+  %w[** codex/**].include?(pattern)
+end
+
+def branches_may_match_generated?(patterns)
+  may_match = false
+  saw_positive = false
+
+  patterns.each.with_index do |pattern, index|
+    negative = pattern.start_with?("!")
+    body = negative ? pattern[1..] : pattern
+    if body.empty? || body.include?("!")
+      raise WorkflowSafetyError, "on.push.branches[#{index}] has ambiguous negation"
+    end
+
+    if negative
+      may_match = false if excludes_every_generated_branch?(body)
+    else
+      saw_positive = true
+      may_match = true if pattern_may_match_generated_branch?(body)
+    end
+  end
+
+  unless saw_positive
+    raise WorkflowSafetyError, "on.push.branches must contain at least one positive pattern"
+  end
+  may_match
+end
+
+def push_may_run_generated_branch?(configuration)
+  return true if configuration.nil?
+  unless configuration.is_a?(Hash)
+    raise WorkflowSafetyError, "on.push must be empty or a filter mapping"
+  end
+
+  unsupported = configuration.keys - PUSH_FILTERS
+  unless unsupported.empty?
+    raise WorkflowSafetyError, "on.push contains unsupported filter(s): #{unsupported.join(', ')}"
+  end
+
+  filters = PUSH_FILTERS.to_h { |key| [key, filter_patterns(configuration, key)] }
+  if filters["branches"] && filters["branches-ignore"]
+    raise WorkflowSafetyError, "on.push cannot combine branches and branches-ignore"
+  end
+  if filters["tags"] && filters["tags-ignore"]
+    raise WorkflowSafetyError, "on.push cannot combine tags and tags-ignore"
+  end
+  if filters["paths"] && filters["paths-ignore"]
+    raise WorkflowSafetyError, "on.push cannot combine paths and paths-ignore"
+  end
+
+  if filters["branches"]
+    return branches_may_match_generated?(filters["branches"])
+  end
+  if filters["branches-ignore"]
+    filters["branches-ignore"].each.with_index do |pattern, index|
+      if pattern.start_with?("!") || pattern.include?("!")
+        raise WorkflowSafetyError, "on.push.branches-ignore[#{index}] has ambiguous negation"
+      end
+    end
+    return !filters["branches-ignore"].any? { |pattern| excludes_every_generated_branch?(pattern) }
+  end
+
+  # GitHub suppresses branch pushes when only tag filters are configured.
+  return false if filters["tags"] || filters["tags-ignore"]
+
+  true
+end
+
+def protected_trigger_reason(workflow)
+  unless workflow.key?("on")
+    raise WorkflowSafetyError, "workflow is missing top-level on trigger"
+  end
+
+  events = trigger_events(workflow["on"])
+  pr_event = PR_EVENTS.find { |event| events.key?(event) }
+  if pr_event
+    configuration = events[pr_event]
+    unless configuration.nil? || configuration.is_a?(Hash)
+      raise WorkflowSafetyError, "on.#{pr_event} must be empty or a filter mapping"
+    end
+  end
+
+  generated_push = events.key?("push") && push_may_run_generated_branch?(events["push"])
+  return "#{pr_event} and generated-branch push" if pr_event && generated_push
+  return pr_event if pr_event
+  return "generated-branch push" if generated_push
+
+  nil
+end
+
+def workflow_call_trigger?(workflow)
+  return false unless workflow.key?("on")
+
+  events = trigger_events(workflow["on"])
+  return false unless events.key?("workflow_call")
+
+  configuration = events["workflow_call"]
+  unless configuration.nil? || configuration.is_a?(Hash)
+    raise WorkflowSafetyError, "on.workflow_call must be empty or a mapping"
+  end
+  true
 end
 
 def parse_permissions(value, location)
@@ -177,69 +324,159 @@ def find_secret_reference(value, location, visited = {})
   nil
 end
 
-def enforce_pr_policy!(workflow)
-  unless workflow.key?("on")
-    raise WorkflowSafetyError, "workflow is missing top-level on trigger"
+def validate_reusable_secrets!(job, location)
+  return unless job.key?("secrets")
+
+  secrets = job["secrets"]
+  if secrets.is_a?(String)
+    if secrets.strip == "inherit"
+      raise WorkflowSafetyError, "#{location}.secrets passes secrets: inherit to a reusable workflow"
+    end
+    raise WorkflowSafetyError, "#{location}.secrets has unsupported scalar #{secrets.inspect}"
   end
-  return unless pull_request_trigger?(workflow["on"])
+  unless secrets.is_a?(Hash)
+    raise WorkflowSafetyError, "#{location}.secrets must be a mapping or inherit"
+  end
+  unless secrets.empty?
+    raise WorkflowSafetyError, "#{location}.secrets passes credentials to a reusable workflow"
+  end
+end
 
-  jobs = workflow["jobs"]
-  unless jobs.is_a?(Hash) && !jobs.empty?
-    raise WorkflowSafetyError, "PR-triggered workflow jobs must be a non-empty mapping"
+def resolve_local_workflow!(uses, entries, location)
+  unless uses.is_a?(String)
+    raise WorkflowSafetyError, "#{location}.uses must be a literal local reusable-workflow reference"
+  end
+  if uses.match?(GITHUB_EXPRESSION)
+    raise WorkflowSafetyError, "#{location}.uses is dynamic or ambiguous"
   end
 
-  workflow_permissions = if workflow.key?("permissions")
-                           parse_permissions(workflow["permissions"], "workflow.permissions")
-                         end
-
-  jobs.each do |job_name, job|
-    unless job.is_a?(Hash)
-      raise WorkflowSafetyError, "jobs.#{job_name} must be a mapping"
-    end
-
-    effective_writes = if job.key?("permissions")
-                         parse_permissions(job["permissions"], "jobs.#{job_name}.permissions")
-                       elsif workflow_permissions
-                         workflow_permissions
-                       else
-                         raise WorkflowSafetyError,
-                               "jobs.#{job_name} inherits repository-default token permissions; explicit read-only permissions are required"
-                       end
-    unless effective_writes.empty?
-      raise WorkflowSafetyError,
-            "jobs.#{job_name} has effective write permission(s): #{effective_writes.join(', ')}"
-    end
-
-    unless job.key?("uses") || job.key?("steps")
-      raise WorkflowSafetyError, "jobs.#{job_name} must contain either uses or steps"
-    end
-    if job.key?("uses") && !job["uses"].is_a?(String)
-      raise WorkflowSafetyError, "jobs.#{job_name}.uses must be a reusable-workflow reference"
-    end
-    if job.key?("steps") && !job["steps"].is_a?(Array)
-      raise WorkflowSafetyError, "jobs.#{job_name}.steps must be a sequence"
-    end
-    if job.key?("uses") && job.key?("steps")
-      raise WorkflowSafetyError, "jobs.#{job_name} ambiguously contains both uses and steps"
-    end
-    if !job.key?("uses") && job.key?("secrets")
-      raise WorkflowSafetyError, "jobs.#{job_name}.secrets is only valid for a reusable-workflow call"
-    end
-    if job.key?("secrets") && job["secrets"].is_a?(String)
-      if job["secrets"].strip == "inherit"
-        raise WorkflowSafetyError, "jobs.#{job_name} passes secrets: inherit to a reusable workflow"
-      end
-      raise WorkflowSafetyError, "jobs.#{job_name}.secrets has unsupported scalar #{job['secrets'].inspect}"
-    end
-    if job.key?("secrets") && !job["secrets"].is_a?(Hash)
-      raise WorkflowSafetyError, "jobs.#{job_name}.secrets must be a mapping or inherit"
-    end
+  match = LOCAL_WORKFLOW.match(uses)
+  unless match
+    raise WorkflowSafetyError, "#{location}.uses references an external or unsupported reusable workflow #{uses.inspect}"
   end
+
+  relative_path = File.join(".github", "workflows", match[1])
+  target = entries[relative_path]
+  unless target
+    raise WorkflowSafetyError, "#{location}.uses references missing local workflow #{relative_path}"
+  end
+  unless workflow_call_trigger?(target.workflow)
+    raise WorkflowSafetyError, "#{location}.uses target #{relative_path} is missing an on.workflow_call trigger"
+  end
+  target
+end
+
+def enforce_policy!(entry, entries, inherited_permissions = nil, stack = [])
+  if stack.include?(entry.relative_path)
+    cycle = (stack + [entry.relative_path]).join(" -> ")
+    raise WorkflowSafetyError, "reusable workflow cycle detected: #{cycle}"
+  end
+  stack = stack + [entry.relative_path]
+  workflow = entry.workflow
 
   secret_location = find_secret_reference(workflow, "workflow")
   if secret_location
     raise WorkflowSafetyError, "#{secret_location} references the secrets context"
   end
+
+  jobs = workflow["jobs"]
+  unless jobs.is_a?(Hash) && !jobs.empty?
+    raise WorkflowSafetyError, "protected workflow jobs must be a non-empty mapping"
+  end
+
+  workflow_permissions = if workflow.key?("permissions")
+                           parse_permissions(workflow["permissions"], "workflow.permissions")
+                         else
+                           inherited_permissions
+                         end
+
+  jobs.each do |job_name, job|
+    location = "jobs.#{job_name}"
+    unless job.is_a?(Hash)
+      raise WorkflowSafetyError, "#{location} must be a mapping"
+    end
+    if job.key?("environment")
+      raise WorkflowSafetyError, "#{location}.environment can expose environment-backed credentials"
+    end
+
+    effective_writes = if job.key?("permissions")
+                         parse_permissions(job["permissions"], "#{location}.permissions")
+                       elsif workflow_permissions
+                         workflow_permissions
+                       else
+                         raise WorkflowSafetyError,
+                               "#{location} inherits repository-default token permissions; explicit read-only permissions are required"
+                       end
+    unless effective_writes.empty?
+      raise WorkflowSafetyError,
+            "#{location} has effective write permission(s): #{effective_writes.join(', ')}"
+    end
+
+    has_uses = job.key?("uses")
+    has_steps = job.key?("steps")
+    unless has_uses || has_steps
+      raise WorkflowSafetyError, "#{location} must contain either uses or steps"
+    end
+    if has_uses && has_steps
+      raise WorkflowSafetyError, "#{location} ambiguously contains both uses and steps"
+    end
+
+    if has_uses
+      validate_reusable_secrets!(job, location)
+      target = resolve_local_workflow!(job["uses"], entries, location)
+      enforce_policy!(target, entries, effective_writes, stack)
+    else
+      unless job["steps"].is_a?(Array)
+        raise WorkflowSafetyError, "#{location}.steps must be a sequence"
+      end
+      if job.key?("secrets")
+        raise WorkflowSafetyError, "#{location}.secrets is only valid for a reusable-workflow call"
+      end
+    end
+  end
+end
+
+def discover_workflows(repository_root)
+  workflow_dir = File.join(repository_root, ".github", "workflows")
+  unless File.exist?(workflow_dir)
+    raise WorkflowSafetyError, ".github/workflows does not exist"
+  end
+  if File.symlink?(workflow_dir) || !File.directory?(workflow_dir)
+    raise WorkflowSafetyError, ".github/workflows must be a real directory"
+  end
+
+  names = Dir.children(workflow_dir).sort
+  raise WorkflowSafetyError, ".github/workflows contains no workflow entries" if names.empty?
+
+  entries = {}
+  errors = []
+  names.each do |name|
+    path = File.join(workflow_dir, name)
+    relative_path = File.join(".github", "workflows", name)
+    begin
+      stat = File.lstat(path)
+      if stat.symlink?
+        raise WorkflowSafetyError, "workflow entry must not be a symbolic link"
+      end
+      unless stat.file?
+        raise WorkflowSafetyError, "workflow entry must be a regular file"
+      end
+      unless name.end_with?(".yml", ".yaml")
+        raise WorkflowSafetyError, "workflow entry has unsupported extension"
+      end
+
+      entries[relative_path] = WorkflowEntry.new(
+        relative_path: relative_path,
+        absolute_path: path,
+        workflow: load_workflow(path)
+      )
+    rescue WorkflowSafetyError => error
+      errors << "#{relative_path}: #{error.message}"
+    rescue StandardError => error
+      errors << "#{relative_path}: parser failure #{error.class}: #{error.message.lines.first.strip}"
+    end
+  end
+  [entries, errors]
 end
 
 repository_root = File.expand_path(Dir.pwd)
@@ -250,25 +487,31 @@ elsif !ARGV.empty?
   exit 2
 end
 
-workflow_dir = File.join(repository_root, ".github", "workflows")
-workflow_paths = Dir.glob(File.join(workflow_dir, "*.{yml,yaml}")).sort
 errors = []
-workflow_paths.each do |path|
+entries = {}
+begin
+  entries, discovery_errors = discover_workflows(repository_root)
+  errors.concat(discovery_errors)
+rescue WorkflowSafetyError => error
+  errors << ".github/workflows: #{error.message}"
+rescue StandardError => error
+  errors << ".github/workflows: parser failure #{error.class}: #{error.message.lines.first.strip}"
+end
+
+entries.each_value do |entry|
   begin
-    if File.symlink?(path)
-      raise WorkflowSafetyError, "workflow file must not be a symbolic link"
-    end
-    enforce_pr_policy!(load_workflow(path))
+    reason = protected_trigger_reason(entry.workflow)
+    enforce_policy!(entry, entries) if reason
   rescue WorkflowSafetyError => error
-    errors << "#{path.delete_prefix(repository_root + File::SEPARATOR)}: #{error.message}"
+    errors << "#{entry.relative_path}: #{error.message}"
   rescue StandardError => error
-    errors << "#{path.delete_prefix(repository_root + File::SEPARATOR)}: parser failure #{error.class}: #{error.message.lines.first.strip}"
+    errors << "#{entry.relative_path}: parser failure #{error.class}: #{error.message.lines.first.strip}"
   end
 end
 
 unless errors.empty?
-  warn "::error title=Unsafe PR credential exposure::Autonomous Codex publication is blocked: #{errors.join('; ')}"
+  warn "::error title=Unsafe generated-code credential exposure::Autonomous Codex publication is blocked: #{errors.join('; ')}"
   exit 1
 end
 
-puts "Caller PR workflows use explicit read-only permissions and do not expose secrets."
+puts "Caller workflows reachable from PR or generated Codex pushes are explicitly read-only and credential-free."

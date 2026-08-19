@@ -80,16 +80,31 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertLess(dispatch, activation)
         self.assertIn("pin exactly the recorded release SHA", content)
 
-    def test_rollout_blocks_scheduler_api_until_pr_ci_is_credential_free(self):
+    def test_rollout_blocks_all_callers_until_live_master_is_credential_free(self):
         content = ROLLOUT.read_text(encoding="utf-8")
-        prerequisite = content.index(
-            "Make `hmcts/juror-scheduler-api` PR verification credential-free"
-        )
+        prerequisite = content.index("Make PR verification credential-free in every Juror caller")
+        live_gate = content.index("live `master` checkout of all seven callers")
         activation = content.index("Enable the Jira dispatch rule")
         self.assertLess(prerequisite, activation)
-        self.assertIn("Azure login and ACR authentication must be push-only", content)
-        self.assertIn("normal PR check and the shared Codex PR credential safety gate", content)
-        self.assertIn("intentionally fails closed for scheduler-api", content)
+        self.assertLess(live_gate, activation)
+        self.assertIn("explicit least-privilege read-only `permissions`", content)
+        self.assertIn("Azure login and ACR authentication push-only", content)
+        self.assertIn("cannot match generated `codex/**` branches", content)
+        self.assertIn("normal PR check and the exact shared Codex credential safety gate", content)
+        self.assertIn("intentionally fails closed for every caller", content)
+        for repository in (
+            "juror-er-portal",
+            "juror-public",
+            "juror-bureau",
+            "juror-api",
+            "juror-scheduler-execution",
+            "juror-pnc",
+            "juror-scheduler-api",
+        ):
+            self.assertIn(f"`hmcts/{repository}`", content)
+        self.assertIn("repository-default token permissions", content)
+        self.assertIn("`security-events: write`", content)
+        self.assertIn("`id-token: write`", content)
 
     def test_model_preflight_never_executes_repository_gradle_wrapper(self):
         content = PREFLIGHT.read_text(encoding="utf-8")

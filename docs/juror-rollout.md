@@ -53,19 +53,33 @@ The JS callback rule consumes the Azure Function's project-specific webhook. For
 ## Platform activation
 
 1. Merge the shared workflow PR after required review and record the resulting 40-character `main` release SHA.
-2. Make `hmcts/juror-scheduler-api` PR verification credential-free before onboarding or activation. Azure login and ACR authentication must be push-only or moved to a separate workflow that cannot run for `pull_request` or `pull_request_target`; PR jobs must not receive write permissions, OIDC tokens or secret-context values.
-3. Raise a trusted scheduler-api validation PR and require both its normal PR check and the shared Codex PR credential safety gate to pass. The shared workflow intentionally fails closed for scheduler-api until this external prerequisite is merged; do not bypass the gate or activate that caller while it remains blocked.
-4. Onboard the two caller wrappers in every Juror repository while Jira dispatch remains disabled. Each onboarding PR must pin exactly that reviewed release SHA; do not use a feature-branch head or an unreviewed shared commit.
-5. Merge the seven caller onboarding PRs.
-6. After all wrappers exist on each caller's `master`, manually dispatch `Update caller workflow pins` with the recorded release SHA. This post-onboarding dispatch is mandatory even if the scheduled retry has already run.
-7. Review and merge every caller pin-update PR raised by the updater. A scheduled retry runs every six hours so a repository that previously returned an explicit wrapper 404 is reconsidered after onboarding.
-8. Verify both wrappers in all seven callers pin exactly the recorded release SHA before enabling any trigger. A caller with a missing wrapper, a different pin or a failed updater matrix job is not accepted for activation.
-9. Merge and deploy the Azure Function routing change.
-10. Configure the JS Jira Automation webhook URL and secret in the Function App.
-11. Configure the GitHub repository secrets and variables.
-12. Set `enable_juror_runner_scale_sets = true`, review the Terraform plan and apply it.
-13. Confirm all seven scale sets register with `minRunners = 0` and `maxRunners = 1`.
-14. Enable the Jira dispatch rule.
+2. Make PR verification credential-free in every Juror caller before onboarding or activation. Every job that executes PR code must declare explicit least-privilege read-only `permissions` and must not receive secrets, OIDC, an environment or any write permission. Move credentialed or write operations to events and branch filters that cannot match generated `codex/**` branches.
+3. In `hmcts/juror-scheduler-api`, make Azure login and ACR authentication push-only on trusted non-generated branches, or separate them from PR verification in a workflow with equivalent branch restrictions. They must never run for `pull_request`, `pull_request_target` or a push that can match `codex/**`.
+4. Raise trusted caller validation PRs and require each caller's normal PR check and the exact shared Codex credential safety gate to pass. Merge the prerequisite safety changes first. The shared workflow intentionally fails closed for every caller until its external prerequisite is present on `master`; do not bypass the gate.
+5. Onboard the two caller wrappers in every Juror repository while Jira dispatch remains disabled. Each onboarding PR must pin exactly that reviewed release SHA; do not use a feature-branch head or an unreviewed shared commit.
+6. Merge the seven caller onboarding PRs.
+7. Run the immutable shared `check-codex-pr-safety.rb` from the recorded release SHA against the live `master` checkout of all seven callers. All seven exact checks must pass before activation; a local approximation, documentation exception or check against an onboarding branch is not sufficient.
+8. After all wrappers exist on each caller's `master`, manually dispatch `Update caller workflow pins` with the recorded release SHA. This post-onboarding dispatch is mandatory even if the scheduled retry has already run.
+9. Review and merge every caller pin-update PR raised by the updater. A scheduled retry runs every six hours so a repository that previously returned an explicit wrapper 404 is reconsidered after onboarding.
+10. Verify both wrappers in all seven callers pin exactly the recorded release SHA before enabling any trigger. A caller with a missing wrapper, a different pin or a failed updater matrix job is not accepted for activation.
+11. Merge and deploy the Azure Function routing change.
+12. Configure the JS Jira Automation webhook URL and secret in the Function App.
+13. Configure the GitHub repository secrets and variables.
+14. Set `enable_juror_runner_scale_sets = true`, review the Terraform plan and apply it.
+15. Confirm all seven scale sets register with `minRunners = 0` and `maxRunners = 1`.
+16. Enable the Jira dispatch rule.
+
+The read-only live audit on 2026-08-19 intentionally blocked all seven `master` branches. These are the observed diagnostics to remediate, not an exemption list; rerun the exact release-pinned checker because caller workflows can change:
+
+| Caller | Observed live blocker |
+|---|---|
+| `hmcts/juror-er-portal` | No `.github/workflows` directory was available to inspect. |
+| `hmcts/juror-public` | The PR build inherited repository-default token permissions; CodeQL requested `security-events: write`. |
+| `hmcts/juror-bureau` | The PR build inherited repository-default token permissions; CodeQL requested `security-events: write`. |
+| `hmcts/juror-api` | The PR build inherited repository-default token permissions; CodeQL requested `security-events: write`. |
+| `hmcts/juror-scheduler-execution` | The PR build inherited repository-default token permissions; CodeQL requested `security-events: write`. |
+| `hmcts/juror-pnc` | The PR build inherited repository-default token permissions; CodeQL requested `security-events: write`. |
+| `hmcts/juror-scheduler-api` | The PR build requested `id-token: write`; CodeQL requested `security-events: write`. |
 
 ## Acceptance tests
 
@@ -82,7 +96,8 @@ Run one controlled Jira-to-PR test in every repository. Confirm:
 - a repository writer can invoke `/codex-review` on a Codex PR;
 - the issue moves to `Peer Review` and receives `pr-ready` when a PR is created;
 - runner pods contain no OpenAI or publisher credentials;
-- scheduler-api PR CI contains no Azure/ACR login, write permission, OIDC token or secret-context exposure, and both its PR check and the shared safety gate pass;
+- all seven live `master` checkouts pass the exact release-pinned credential safety policy, and their normal PR checks pass;
+- scheduler-api PR CI contains no Azure/ACR login, write permission, OIDC token, environment or secret-context exposure, and Azure/ACR operations are restricted to trusted non-generated branches/events;
 - both caller wrappers pin the recorded, reviewed shared `main` release SHA and the post-onboarding updater dispatch completed without skipped or failed repositories; and
 - every scale set returns to zero after its run.
 
