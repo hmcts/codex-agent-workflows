@@ -178,79 +178,12 @@ if [[ -n "${SKIP_REASON}" ]]; then
   skip_codex_action "${SKIP_REASON}"
 fi
 
-gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews?per_page=100" >"${reviews_json_path}"
-gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/comments?per_page=100" >"${review_comments_json_path}"
-
-REVIEWS_JSON_PATH="${reviews_json_path}" REVIEW_COMMENTS_JSON_PATH="${review_comments_json_path}" python3 - <<'PY' >>"${feedback_env_path}"
-import json
-import os
-import shlex
-
-with open(os.environ["REVIEWS_JSON_PATH"], encoding="utf-8") as reviews_file:
-    reviews = json.load(reviews_file)
-with open(os.environ["REVIEW_COMMENTS_JSON_PATH"], encoding="utf-8") as comments_file:
-    review_comments = json.load(comments_file)
-
-comments_by_review = {}
-for comment in review_comments:
-    review_id = comment.get("pull_request_review_id")
-    if review_id is not None:
-        comments_by_review.setdefault(review_id, []).append(comment)
-
-actionable_reviews = []
-for review in reviews:
-    review_id = review.get("id")
-    state = (review.get("state") or "").upper()
-    association = review.get("author_association") or ""
-    body = (review.get("body") or "").strip()
-    comments = comments_by_review.get(review_id, [])
-    if (
-        state in {"CHANGES_REQUESTED", "COMMENTED"}
-        and association in {"COLLABORATOR", "MEMBER", "OWNER"}
-        and (body or comments)
-    ):
-        actionable_reviews.append(review)
-
-if not actionable_reviews:
-    print(f"SKIP_REASON={shlex.quote('no actionable trusted review feedback was found')}")
-    raise SystemExit
-
-review = max(
-    actionable_reviews,
-    key=lambda item: (item.get("submitted_at") or "", item.get("id") or 0),
-)
-review_id = review.get("id")
-formatted_comments = []
-for index, comment in enumerate(comments_by_review.get(review_id, []), start=1):
-    path = (comment.get("path") or "").strip()
-    url = (comment.get("html_url") or "").strip()
-    diff_hunk = (comment.get("diff_hunk") or "").strip()
-    body = (comment.get("body") or "").strip()
-
-    parts = [f"Inline comment {index}:"]
-    if url:
-        parts.append(f"URL: {url}")
-    if path:
-        parts.append(f"File path: {path}")
-    if diff_hunk:
-        parts.append(f"Diff hunk:\n{diff_hunk}")
-    if body:
-        parts.append(f"Comment:\n{body}")
-
-    formatted_comments.append("\n".join(parts))
-
-values = {
-    "COMMENT_KIND": "pull_request_review",
-    "COMMENT_AUTHOR": review.get("user", {}).get("login", ""),
-    "COMMENT_BODY": (review.get("body") or "").strip(),
-    "COMMENT_URL": review.get("html_url") or "",
-    "REVIEW_STATE": review.get("state") or "",
-    "REVIEW_ID": str(review_id or ""),
-    "REVIEW_COMMENTS": "\n".join(formatted_comments),
-}
-for key, value in values.items():
-    print(f"{key}={shlex.quote(value)}")
-PY
+python3 -I "${script_dir}/codex-review-feedback-data.py" \
+  --repository "${GITHUB_REPOSITORY}" \
+  --pr-number "${PR_NUMBER}" \
+  --reviews-output "${reviews_json_path}" \
+  --comments-output "${review_comments_json_path}" \
+  --env-output "${feedback_env_path}"
 
 set -a
 # shellcheck disable=SC1090

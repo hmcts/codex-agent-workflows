@@ -305,10 +305,17 @@ class WorkflowContractTests(unittest.TestCase):
         preparation = (ROOT / "scripts" / "codex-pr-review-feedback.sh").read_text(
             encoding="utf-8"
         )
+        collector = (ROOT / "scripts" / "codex-review-feedback-data.py").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn('event_name == "pull_request_review"', preparation)
         self.assertNotIn('event_name == "pull_request_review_comment"', preparation)
-        self.assertIn("no actionable trusted review feedback was found", preparation)
-        self.assertIn("comments_by_review", preparation)
+        self.assertIn(
+            'python3 -I "${script_dir}/codex-review-feedback-data.py"', preparation
+        )
+        self.assertIn("no actionable trusted review feedback was found", collector)
+        self.assertIn("latest_submitted_reviews", collector)
+        self.assertIn('["gh", "api", "--paginate", "--slurp", endpoint]', collector)
 
     def test_verifiers_gate_applied_patch_with_trusted_checker(self):
         for name in ("codex-jira-verify.sh", "codex-pr-review-verify.sh"):
