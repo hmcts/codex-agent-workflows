@@ -52,15 +52,18 @@ The JS callback rule consumes the Azure Function's project-specific webhook. For
 
 ## Platform activation
 
-1. Merge the shared workflow PR after required review.
-2. Pin each caller to a commit reachable from shared-repository `main`.
-3. Merge the seven caller PRs.
-4. Merge and deploy the Azure Function routing change.
-5. Configure the JS Jira Automation webhook URL and secret in the Function App.
-6. Configure the GitHub repository secrets and variables.
-7. Set `enable_juror_runner_scale_sets = true`, review the Terraform plan and apply it.
-8. Confirm all seven scale sets register with `minRunners = 0` and `maxRunners = 1`.
-9. Enable the Jira dispatch rule.
+1. Merge the shared workflow PR after required review and record the resulting 40-character `main` release SHA.
+2. Onboard the two caller wrappers in every Juror repository while Jira dispatch remains disabled. Each onboarding PR must pin exactly that reviewed release SHA; do not use a feature-branch head or an unreviewed shared commit.
+3. Merge the seven caller onboarding PRs.
+4. After all wrappers exist on each caller's `master`, manually dispatch `Update caller workflow pins` with the recorded release SHA. This post-onboarding dispatch is mandatory even if the scheduled retry has already run.
+5. Review and merge every caller pin-update PR raised by the updater. A scheduled retry runs every six hours so a repository that previously returned an explicit wrapper 404 is reconsidered after onboarding.
+6. Verify both wrappers in all seven callers pin exactly the recorded release SHA before enabling any trigger. A caller with a missing wrapper, a different pin or a failed updater matrix job is not accepted for activation.
+7. Merge and deploy the Azure Function routing change.
+8. Configure the JS Jira Automation webhook URL and secret in the Function App.
+9. Configure the GitHub repository secrets and variables.
+10. Set `enable_juror_runner_scale_sets = true`, review the Terraform plan and apply it.
+11. Confirm all seven scale sets register with `minRunners = 0` and `maxRunners = 1`.
+12. Enable the Jira dispatch rule.
 
 ## Acceptance tests
 
@@ -76,7 +79,8 @@ Run one controlled Jira-to-PR test in every repository. Confirm:
 - existing Jenkins, Sonar, functional and smoke checks start normally;
 - a repository writer can invoke `/codex-review` on a Codex PR;
 - the issue moves to `Peer Review` and receives `pr-ready` when a PR is created;
-- runner pods contain no OpenAI or publisher credentials; and
+- runner pods contain no OpenAI or publisher credentials;
+- both caller wrappers pin the recorded, reviewed shared `main` release SHA and the post-onboarding updater dispatch completed without skipped or failed repositories; and
 - every scale set returns to zero after its run.
 
 Disable the Jira rule and set `enable_juror_runner_scale_sets = false` if routing, credential isolation, callbacks or scale-to-zero checks fail.

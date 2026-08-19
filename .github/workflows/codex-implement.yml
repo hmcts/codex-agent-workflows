@@ -477,9 +477,44 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  codex-generation-terminal-failed:
+    needs: [validate-codex-plan, codex-generate-action, codex-generate]
+    if: |
+      always() &&
+      needs.validate-codex-plan.outputs.ready_to_implement == 'true' &&
+      (
+        needs.codex-generate.outputs.has_changes != 'true' &&
+        needs.codex-generate.outputs.has_changes != 'false'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@8066b0980d0f098ff82e4964334e77c4dd6685a5
+
+      - name: Notify Jira that implementation generation failed
+        continue-on-error: true
+        env:
+          ACTION_OUTCOME: ${{ needs.codex-generate-action.result }}
+          COLLECTION_OUTCOME: ${{ needs.codex-generate.result }}
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --status failed \
+            --message "Codex implementation generation did not produce a trusted terminal result (action: ${ACTION_OUTCOME}; collection: ${COLLECTION_OUTCOME})."
+
+      - name: Fail implementation generation terminal handler
+        run: exit 1
+
   codex-no-changes:
     needs: codex-generate
-    if: always() && needs.codex-generate.outputs.has_changes == 'false'
+    if: always() && needs.codex-generate.result == 'success' && needs.codex-generate.outputs.has_changes == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -1513,6 +1548,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Enforce pull-request credential isolation
+        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.py --repository-root "$GITHUB_WORKSPACE"
+
       - name: Create GitHub App installation token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -1666,6 +1704,9 @@ jobs:
           ref: ${{ needs.codex-generate.outputs.trusted_sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Enforce pull-request credential isolation
+        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.py --repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token
@@ -2203,6 +2244,9 @@ jobs:
           ref: ${{ needs.codex-generate.outputs.trusted_sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Enforce pull-request credential isolation
+        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.py --repository-root "$GITHUB_WORKSPACE"
 
       - name: Create GitHub App installation token
         id: app-token

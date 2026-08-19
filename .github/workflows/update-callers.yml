@@ -1,6 +1,8 @@
 name: Update caller workflow pins
 
 on:
+  schedule:
+    - cron: '17 */6 * * *'
   push:
     branches: [main]
     paths:
@@ -98,14 +100,23 @@ jobs:
           mkdir -p "${update_dir}"
           changed=false
           for path in .github/workflows/codex_jira_dispatch.yml .github/workflows/codex_pr_review.yml; do
-            metadata="$(gh api "repos/${TARGET_REPOSITORY}/contents/${path}?ref=${TARGET_BRANCH}" 2>/dev/null || true)"
+            name="$(basename "${path}")"
+            api_error="${update_dir}/${name}.api-error"
+            if ! metadata="$(gh api "repos/${TARGET_REPOSITORY}/contents/${path}?ref=${TARGET_BRANCH}" 2>"${api_error}")"; then
+              if python3 -I .github/scripts/is-explicit-contents-404.py "${api_error}"; then
+                echo "${TARGET_REPOSITORY} does not contain ${path}; skipping this release."
+                exit 0
+              fi
+              cat "${api_error}" >&2
+              echo "::error title=Caller workflow lookup failed::Unable to inspect ${TARGET_REPOSITORY}/${path}; only an explicit Contents API HTTP 404 may be treated as not onboarded." >&2
+              exit 1
+            fi
             if [[ -z "${metadata}" ]]; then
-              echo "${TARGET_REPOSITORY} does not contain ${path}; skipping this release."
-              exit 0
+              echo "::error title=Empty Contents API response::Unable to validate ${TARGET_REPOSITORY}/${path}; refusing to treat an empty response as not onboarded." >&2
+              exit 1
             fi
 
             blob_sha="$(jq -r .sha <<<"${metadata}")"
-            name="$(basename "${path}")"
             input_path="${update_dir}/${name}.input"
             output_path="${update_dir}/${name}.output"
             jq -r .content <<<"${metadata}" | base64 --decode >"${input_path}"

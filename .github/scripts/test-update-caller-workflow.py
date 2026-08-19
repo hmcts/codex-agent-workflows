@@ -105,6 +105,47 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
                 NEW_SHA,
             )
 
+    def test_does_not_borrow_with_block_from_later_job(self):
+        caller = dispatch_caller().replace("    with:\n", "    configuration:\n", 1)
+        caller += "  later:\n    runs-on: ubuntu-latest\n    with:\n      summary: borrowed\n"
+
+        with self.assertRaisesRegex(MODULE.CallerContractError, "missing with: block"):
+            MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+
+    def test_does_not_borrow_secrets_block_from_later_job(self):
+        caller = dispatch_caller().replace("    secrets:\n", "    configuration-secrets:\n", 1)
+        caller += (
+            "  later:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    secrets:\n"
+            "      CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}\n"
+        )
+
+        with self.assertRaisesRegex(MODULE.CallerContractError, "missing secrets: block"):
+            MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+
+    def test_rejects_wrong_required_secret_mapping(self):
+        caller = dispatch_caller().replace(
+            "${{ secrets.CODEX_SONAR_TOKEN }}", "${{ secrets.OTHER_TOKEN }}"
+        )
+
+        with self.assertRaisesRegex(
+            MODULE.CallerContractError,
+            r"CODEX_SONAR_TOKEN must map exactly to \$\{\{ secrets.CODEX_SONAR_TOKEN \}\}",
+        ):
+            MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+
+    def test_rejects_empty_required_secret_mapping(self):
+        caller = dispatch_caller().replace(
+            "CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}",
+            "CODEX_OPENAI_API_KEY:",
+        )
+
+        with self.assertRaisesRegex(
+            MODULE.CallerContractError, "CODEX_OPENAI_API_KEY must map exactly"
+        ):
+            MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+
 
 if __name__ == "__main__":
     unittest.main()

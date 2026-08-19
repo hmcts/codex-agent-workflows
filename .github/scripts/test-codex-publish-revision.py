@@ -18,6 +18,8 @@ BASE_SHA = "a" * 40
 HEAD_SHA = "b" * 40
 NEW_SHA = "c" * 40
 MOVED_SHA = "d" * 40
+LOCAL_TREE_SHA = "e" * 40
+OTHER_TREE_SHA = "f" * 40
 
 
 class PublisherRevisionTest(unittest.TestCase):
@@ -28,6 +30,11 @@ class PublisherRevisionTest(unittest.TestCase):
         remote_base: str | Sequence[str],
         remote_head: str | Sequence[str],
         fail_pr_comment: bool = False,
+        remote_parent: str = BASE_SHA,
+        remote_tree: str = LOCAL_TREE_SHA,
+        pr_exists: bool = True,
+        fail_pr_create: bool = False,
+        pr_head_sha: str = NEW_SHA,
     ) -> tuple[Path, Path]:
         fake_bin = root / "bin"
         fake_bin.mkdir()
@@ -78,6 +85,13 @@ elif [[ "$args" == *"rev-parse refs/remotes/origin/codex/example"* ]]; then
   printf '%s\\n' {HEAD_SHA!r}
 elif [[ "$args" == *"rev-parse refs/remotes/origin/master"* ]]; then
   printf '%s\\n' {BASE_SHA!r}
+elif [[ "$args" == *"rev-parse HEAD^{{tree}}"* ]]; then
+  printf '%s\\n' {LOCAL_TREE_SHA!r}
+elif [[ "$args" == *"rev-parse "*"^{{tree}}"* ]]; then
+  printf '%s\\n' {remote_tree!r}
+elif [[ "$args" == *"rev-list --parents -n 1"* ]]; then
+  commit_sha="${{args##* }}"
+  printf '%s %s\\n' "$commit_sha" {remote_parent!r}
 elif [[ "$args" == *"rev-parse HEAD"* ]]; then
   printf '%s\\n' {NEW_SHA!r}
 elif [[ "$args" == *"merge --no-commit --no-ff"* ]]; then
@@ -98,16 +112,34 @@ fi
         fake_git.chmod(0o755)
 
         fake_gh = fake_bin / "gh"
+        comment_body = root / "published-comment.md"
         fake_gh.write_text(
             f"""#!/usr/bin/env bash
 set -euo pipefail
 case "$*" in
-  *"pr list"*) echo "https://example.invalid/pull/42" ;;
-  *"pr view"*) echo "42" ;;
+  *"pr list"*)
+    if [[ {str(pr_exists).lower()!r} == "true" ]]; then
+      echo "https://example.invalid/pull/42"
+    fi
+    ;;
+  *"pr create"*)
+    if [[ {str(fail_pr_create).lower()!r} == "true" ]]; then
+      exit 24
+    fi
+    echo "https://example.invalid/pull/42"
+    ;;
+  *"pr view"*) printf '42\tmaster\tcodex/example\t%s\n' {pr_head_sha!r} ;;
   *"pr comment"*)
     if [[ {str(fail_pr_comment).lower()!r} == "true" ]]; then
       exit 23
     fi
+    previous=""
+    for argument in "$@"; do
+      if [[ "$previous" == "--body-file" ]]; then
+        cp "$argument" {str(comment_body)!r}
+      fi
+      previous="$argument"
+    done
     ;;
 esac
 """,
@@ -321,6 +353,10 @@ esac
                 "Updated the code.",
                 encoding="utf-8",
             )
+            (verified / "codex-review-comment.md").write_text(
+                "Manual verification required: sensitive workflow files changed.\n",
+                encoding="utf-8",
+            )
         else:
             raise ValueError(f"Unsupported artifact kind: {kind}")
 
@@ -331,7 +367,9 @@ esac
         remote_head: str,
         *,
         fail_pr_comment: bool = False,
-    ) -> tuple[subprocess.CompletedProcess[str], str, str]:
+        remote_parent: str = BASE_SHA,
+        remote_tree: str = LOCAL_TREE_SHA,
+    ) -> tuple[subprocess.CompletedProcess[str], str, str, str]:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             output, verified = self.write_patch_artifacts(root, kind="review")
@@ -340,6 +378,8 @@ esac
                 remote_base=BASE_SHA,
                 remote_head=remote_head,
                 fail_pr_comment=fail_pr_comment,
+                remote_parent=remote_parent,
+                remote_tree=remote_tree,
             )
             github_output = root / "github-output"
             completed = subprocess.run(
@@ -365,10 +405,12 @@ esac
             )
             commands = command_log.read_text(encoding="utf-8") if command_log.exists() else ""
             outputs = github_output.read_text(encoding="utf-8") if github_output.exists() else ""
-            return completed, commands, outputs
+            comment_path = root / "published-comment.md"
+            comment = comment_path.read_text(encoding="utf-8") if comment_path.exists() else ""
+            return completed, commands, outputs, comment
 
     def run_review(self, remote_head: str) -> tuple[subprocess.CompletedProcess[str], str]:
-        completed, commands, _ = self.run_review_with_outputs(remote_head)
+        completed, commands, _, _ = self.run_review_with_outputs(remote_head)
         return completed, commands
 
     def run_jira_with_outputs(
@@ -378,6 +420,11 @@ esac
         remote_base: str | Sequence[str] = BASE_SHA,
         remote_head: str | Sequence[str] = "",
         fail_notify: bool = False,
+        remote_parent: str = BASE_SHA,
+        remote_tree: str = LOCAL_TREE_SHA,
+        pr_exists: bool = True,
+        fail_pr_create: bool = False,
+        pr_head_sha: str = NEW_SHA,
     ) -> tuple[subprocess.CompletedProcess[str], str, str]:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -388,6 +435,11 @@ esac
                 root,
                 remote_base=remote_base,
                 remote_head=remote_head,
+                remote_parent=remote_parent,
+                remote_tree=remote_tree,
+                pr_exists=pr_exists,
+                fail_pr_create=fail_pr_create,
+                pr_head_sha=pr_head_sha,
             )
             github_output = root / "github-output"
             env = {
@@ -433,11 +485,17 @@ esac
         mode: str,
         remote_base: str | Sequence[str] = BASE_SHA,
         remote_head: str | Sequence[str] = "",
+        remote_parent: str = BASE_SHA,
+        remote_tree: str = LOCAL_TREE_SHA,
+        pr_exists: bool = True,
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         completed, commands, _ = self.run_jira_with_outputs(
             mode=mode,
             remote_base=remote_base,
             remote_head=remote_head,
+            remote_parent=remote_parent,
+            remote_tree=remote_tree,
+            pr_exists=pr_exists,
         )
         return completed, commands
 
@@ -450,7 +508,7 @@ esac
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_review_publisher_persists_push_outputs_before_comment_failure(self) -> None:
-        completed, commands, outputs = self.run_review_with_outputs(
+        completed, commands, outputs, _ = self.run_review_with_outputs(
             HEAD_SHA,
             fail_pr_comment=True,
         )
@@ -474,6 +532,31 @@ esac
         self.assertIn("pr_url=https://example.invalid/pull/42\n", outputs)
         self.assertIn("pr_number=42\n", outputs)
 
+    def test_jira_publisher_persists_branch_outputs_before_pr_create_failure(self) -> None:
+        completed, commands, outputs = self.run_jira_with_outputs(
+            mode="initial",
+            pr_exists=False,
+            fail_pr_create=True,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assert_command_logged(commands, "push")
+        self.assertIn("branch_name=codex/example\n", outputs)
+        self.assertIn(f"commit_sha={NEW_SHA}\n", outputs)
+        self.assertNotIn("pr_url=", outputs)
+
+    def test_jira_publisher_rejects_pr_with_wrong_head_identity(self) -> None:
+        completed, commands, outputs = self.run_jira_with_outputs(
+            mode="initial",
+            pr_head_sha=MOVED_SHA,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assert_command_logged(commands, "push")
+        self.assertIn("Published PR identity mismatch", completed.stderr)
+        self.assertIn("pr_url=https://example.invalid/pull/42\n", outputs)
+        self.assertNotIn("pr_number=", outputs)
+
     def test_publication_code_does_not_dispatch_pr_tasks(self) -> None:
         publication_paths = [JIRA_PUBLISHER, REVIEW_PUBLISHER]
         publication_paths.extend(
@@ -493,7 +576,29 @@ esac
     def test_review_publisher_rejects_moved_head(self) -> None:
         completed, _ = self.run_review(MOVED_SHA)
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("PR branch moved", completed.stderr)
+        self.assertIn("Existing review branch mismatch", completed.stderr)
+
+    def test_review_publisher_recovers_exact_previously_pushed_commit(self) -> None:
+        completed, commands, outputs, comment = self.run_review_with_outputs(
+            NEW_SHA,
+            remote_parent=HEAD_SHA,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assert_no_push(commands)
+        self.assertIn(f"commit_sha={NEW_SHA}\n", outputs)
+        self.assertIn("Manual verification required", comment)
+
+    def test_review_publisher_rejects_recovery_with_wrong_tree(self) -> None:
+        completed, commands, _, _ = self.run_review_with_outputs(
+            NEW_SHA,
+            remote_parent=HEAD_SHA,
+            remote_tree=OTHER_TREE_SHA,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("Existing review branch mismatch", completed.stderr)
+        self.assert_no_push(commands)
 
     def test_jira_initial_publish_requires_absent_branch(self) -> None:
         completed, commands = self.run_jira(mode="initial")
@@ -504,10 +609,27 @@ esac
             commands,
         )
 
-    def test_jira_initial_publish_rejects_existing_branch(self) -> None:
-        completed, commands = self.run_jira(mode="initial", remote_head=HEAD_SHA)
+    def test_jira_initial_publish_recovers_exact_branch_and_creates_missing_pr(self) -> None:
+        completed, commands, outputs = self.run_jira_with_outputs(
+            mode="initial",
+            remote_head=HEAD_SHA,
+            pr_exists=False,
+            pr_head_sha=HEAD_SHA,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assert_no_push(commands)
+        self.assertIn(f"commit_sha={HEAD_SHA}\n", outputs)
+        self.assertIn("pr_url=https://example.invalid/pull/42\n", outputs)
+
+    def test_jira_initial_publish_rejects_existing_branch_with_wrong_tree(self) -> None:
+        completed, commands = self.run_jira(
+            mode="initial",
+            remote_head=HEAD_SHA,
+            remote_tree=OTHER_TREE_SHA,
+        )
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("Initial publication requires", completed.stderr)
+        self.assertIn("Existing generated branch mismatch", completed.stderr)
         self.assert_no_push(commands)
 
     def test_jira_publisher_rejects_moved_base(self) -> None:
