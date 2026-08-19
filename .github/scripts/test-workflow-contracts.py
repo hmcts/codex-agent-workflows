@@ -45,6 +45,22 @@ class WorkflowContractTests(unittest.TestCase):
                 f"immutable runtime {pin} does not package {path}: {completed.stderr}",
             )
 
+        recovery_helper = subprocess.run(
+            [
+                "git",
+                "show",
+                f"{pin}:.github/scripts/codex-recover-pr-state.py",
+            ],
+            cwd=ROOT.parent,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(recovery_helper.returncode, 0, recovery_helper.stderr)
+        self.assertIn(
+            'parser.add_argument("--base-sha", required=True)',
+            recovery_helper.stdout,
+        )
+
     def test_both_reusable_workflows_require_jira_callback_secret(self):
         for workflow in (IMPLEMENT_WORKFLOW, REVIEW_WORKFLOW):
             content = workflow.read_text(encoding="utf-8")

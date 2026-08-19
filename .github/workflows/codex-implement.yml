@@ -103,7 +103,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -157,7 +157,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout trusted plan validator
         uses: actions/checkout@v7
@@ -225,7 +225,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Notify Jira that planning failed
         continue-on-error: true
@@ -268,7 +268,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Notify Jira that implementation is blocked
         continue-on-error: true
@@ -310,7 +310,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout planned repository revision
         uses: actions/checkout@v7
@@ -364,7 +364,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout planned repository revision
         uses: actions/checkout@v7
@@ -435,7 +435,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout trusted collector
         uses: actions/checkout@v7
@@ -497,7 +497,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Notify Jira that implementation generation failed
         continue-on-error: true
@@ -526,7 +526,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Notify Jira that no repository changes are required
         run: |
@@ -557,7 +557,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Download credential-free verification source
         uses: actions/download-artifact@v8
@@ -666,7 +666,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -744,7 +744,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout trusted collector
         uses: actions/checkout@v7
@@ -808,7 +808,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Download credential-free verification source
         uses: actions/download-artifact@v8
@@ -917,7 +917,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -995,7 +995,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout trusted collector
         uses: actions/checkout@v7
@@ -1059,7 +1059,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Download credential-free verification source
         uses: actions/download-artifact@v8
@@ -1168,7 +1168,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -1246,7 +1246,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout trusted collector
         uses: actions/checkout@v7
@@ -1310,7 +1310,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Download credential-free verification source
         uses: actions/download-artifact@v8
@@ -1426,7 +1426,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Download credential-free verification source
         id: source
@@ -1540,7 +1540,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout trusted publisher
         uses: actions/checkout@v7
@@ -1719,7 +1719,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -1866,7 +1866,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Record selected Codex artifacts
         id: selected-artifacts
@@ -1955,7 +1955,7 @@ jobs:
       STATUS_FAILURE_ARTIFACT: codex-jira-pr-status-failure-0
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout trusted status scripts
         uses: actions/checkout@v7
@@ -2032,7 +2032,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -2110,7 +2110,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout trusted collector
         uses: actions/checkout@v7
@@ -2172,7 +2172,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Record selected Codex artifacts
         id: selected-artifacts
@@ -2281,7 +2281,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -2416,7 +2416,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Download credential-free verification source
         uses: actions/download-artifact@v8
@@ -2498,7 +2498,7 @@ jobs:
       STATUS_FAILURE_ARTIFACT: codex-jira-pr-status-failure-1
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Checkout trusted status scripts
         uses: actions/checkout@v7
@@ -2578,7 +2578,7 @@ jobs:
       CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Create GitHub App installation token
         id: app-token
@@ -2637,7 +2637,7 @@ jobs:
     permissions: {}
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Fail after repair attempts
         run: |
@@ -2666,7 +2666,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b41137f49052e95a8ce9976b2b167cfdff8dbe4d
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@2c037cb2ada74d425a83f1c8031528a461929504
 
       - name: Notify Jira that no patch could be published
         continue-on-error: true
