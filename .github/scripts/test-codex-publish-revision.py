@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import tempfile
@@ -35,6 +36,12 @@ class PublisherRevisionTest(unittest.TestCase):
         pr_exists: bool = True,
         fail_pr_create: bool = False,
         pr_head_sha: str = NEW_SHA,
+        pr_base_ref: str = "master",
+        pr_base_repository: str = "hmcts/example",
+        pr_head_ref: str = "codex/example",
+        pr_head_repository: str = "hmcts/example",
+        pr_is_draft: bool = False,
+        multiple_prs: bool = False,
     ) -> tuple[Path, Path]:
         fake_bin = root / "bin"
         fake_bin.mkdir()
@@ -113,20 +120,41 @@ fi
 
         fake_gh = fake_bin / "gh"
         comment_body = root / "published-comment.md"
+        pr_candidate = {
+            "number": 42,
+            "html_url": "https://github.com/hmcts/example/pull/42",
+            "state": "open",
+            "draft": pr_is_draft,
+            "base": {
+                "ref": pr_base_ref,
+                "repo": {"full_name": pr_base_repository},
+            },
+            "head": {
+                "ref": pr_head_ref,
+                "sha": pr_head_sha,
+                "repo": {"full_name": pr_head_repository},
+            },
+        }
+        open_prs = [pr_candidate] if pr_exists else []
+        if multiple_prs:
+            duplicate = {**pr_candidate, "number": 43}
+            duplicate["html_url"] = "https://github.com/hmcts/example/pull/43"
+            open_prs.append(duplicate)
+        paginated_prs = json.dumps([open_prs])
+        pr_candidate_json = json.dumps(pr_candidate)
         fake_gh.write_text(
             f"""#!/usr/bin/env bash
 set -euo pipefail
 case "$*" in
-  *"pr list"*)
-    if [[ {str(pr_exists).lower()!r} == "true" ]]; then
-      echo "https://example.invalid/pull/42"
-    fi
+  *"api --paginate --slurp repos/hmcts/example/pulls?state=open&per_page=100"*)
+    printf '%s\n' {paginated_prs!r}
     ;;
+  *"api repos/hmcts/example/pulls/42"*) printf '%s\n' {pr_candidate_json!r} ;;
   *"pr create"*)
     if [[ {str(fail_pr_create).lower()!r} == "true" ]]; then
       exit 24
     fi
-    echo "https://example.invalid/pull/42"
+    echo "https://github.com/hmcts/example/pull/42"
     ;;
   *"pr view"*) printf '42\tmaster\tcodex/example\t%s\n' {pr_head_sha!r} ;;
   *"pr comment"*)
@@ -428,6 +456,13 @@ esac
         pr_exists: bool = True,
         fail_pr_create: bool = False,
         pr_head_sha: str = NEW_SHA,
+        pr_base_ref: str = "master",
+        pr_base_repository: str = "hmcts/example",
+        pr_head_ref: str = "codex/example",
+        pr_head_repository: str = "hmcts/example",
+        pr_is_draft: bool = False,
+        multiple_prs: bool = False,
+        expected_draft: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str], str, str]:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -443,6 +478,12 @@ esac
                 pr_exists=pr_exists,
                 fail_pr_create=fail_pr_create,
                 pr_head_sha=pr_head_sha,
+                pr_base_ref=pr_base_ref,
+                pr_base_repository=pr_base_repository,
+                pr_head_ref=pr_head_ref,
+                pr_head_repository=pr_head_repository,
+                pr_is_draft=pr_is_draft,
+                multiple_prs=multiple_prs,
             )
             github_output = root / "github-output"
             env = {
@@ -465,6 +506,7 @@ esac
                 "CODEX_RUNTIME_PATH": str(SCRIPT_DIR.parent.parent),
                 "RUNNER_TEMP": str(root / "runner"),
                 "GITHUB_OUTPUT": str(github_output),
+                "PR_DRAFT": str(expected_draft).lower(),
             }
             if fail_notify:
                 env["CODEX_JIRA_PR_NOTIFY_URL"] = "http://127.0.0.1:1/notify"
@@ -532,7 +574,7 @@ esac
         self.assert_command_logged(commands, "push")
         self.assertIn("branch_name=codex/example\n", outputs)
         self.assertIn(f"commit_sha={NEW_SHA}\n", outputs)
-        self.assertIn("pr_url=https://example.invalid/pull/42\n", outputs)
+        self.assertIn("pr_url=https://github.com/hmcts/example/pull/42\n", outputs)
         self.assertIn("pr_number=42\n", outputs)
 
     def test_jira_publisher_persists_branch_outputs_before_pr_create_failure(self) -> None:
@@ -556,9 +598,33 @@ esac
 
         self.assertNotEqual(completed.returncode, 0)
         self.assert_command_logged(commands, "push")
-        self.assertIn("Published PR identity mismatch", completed.stderr)
-        self.assertIn("pr_url=https://example.invalid/pull/42\n", outputs)
+        self.assertIn("does not match exact recovery state", completed.stderr)
+        self.assertNotIn("pr_url=", outputs)
         self.assertNotIn("pr_number=", outputs)
+
+    def test_jira_publisher_rejects_incompatible_recovered_pr_identity(self) -> None:
+        cases = {
+            "wrong base": {"pr_base_ref": "develop"},
+            "wrong base repository": {"pr_base_repository": "hmcts/other"},
+            "fork head": {"pr_head_repository": "contributor/example"},
+            "wrong head ref": {"pr_head_ref": "codex/other"},
+            "ready instead of draft": {"expected_draft": True},
+            "draft instead of ready": {"pr_is_draft": True},
+            "multiple pull requests": {"multiple_prs": True},
+        }
+        for case, options in cases.items():
+            with self.subTest(case=case):
+                completed, commands, outputs = self.run_jira_with_outputs(
+                    mode="initial",
+                    remote_head=HEAD_SHA,
+                    pr_head_sha=HEAD_SHA,
+                    **options,
+                )
+
+                self.assertNotEqual(completed.returncode, 0)
+                self.assert_no_push(commands)
+                self.assertIn("Unable to recover exact pull request state", completed.stderr)
+                self.assertNotIn("pr_url=", outputs)
 
     def test_publication_code_does_not_dispatch_pr_tasks(self) -> None:
         publication_paths = [JIRA_PUBLISHER, REVIEW_PUBLISHER]
@@ -639,7 +705,7 @@ esac
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assert_no_push(commands)
         self.assertIn(f"commit_sha={HEAD_SHA}\n", outputs)
-        self.assertIn("pr_url=https://example.invalid/pull/42\n", outputs)
+        self.assertIn("pr_url=https://github.com/hmcts/example/pull/42\n", outputs)
 
     def test_jira_initial_publish_rejects_existing_branch_with_wrong_tree(self) -> None:
         completed, commands = self.run_jira(
@@ -654,7 +720,57 @@ esac
     def test_jira_publisher_rejects_moved_base(self) -> None:
         completed, _ = self.run_jira(mode="initial", remote_base=MOVED_SHA)
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("Source revision moved", completed.stderr)
+        self.assertIn("Default branch moved", completed.stderr)
+
+    def test_jira_publisher_rechecks_default_immediately_before_each_push(self) -> None:
+        for mode, remote_head in (("initial", ""), ("repair", HEAD_SHA)):
+            with self.subTest(mode=mode):
+                completed, commands = self.run_jira(
+                    mode=mode,
+                    remote_base=[BASE_SHA, MOVED_SHA],
+                    remote_head=remote_head,
+                )
+
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("Default branch moved", completed.stderr)
+                self.assert_command_logged(commands, "commit")
+                self.assert_no_push(commands)
+
+    def test_jira_publisher_fails_closed_when_default_lookup_fails_before_push(self) -> None:
+        completed, commands = self.run_jira(
+            mode="initial",
+            remote_base=[BASE_SHA, ""],
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("Default branch unavailable", completed.stderr)
+        self.assert_command_logged(commands, "commit")
+        self.assert_no_push(commands)
+
+    def test_jira_recovery_rechecks_default_after_tree_validation(self) -> None:
+        cases = (
+            ("initial", HEAD_SHA, BASE_SHA, HEAD_SHA),
+            ("repair", NEW_SHA, HEAD_SHA, NEW_SHA),
+        )
+        for mode, remote_head, remote_parent, pr_head_sha in cases:
+            for freshness_case, final_base in (
+                ("moved", MOVED_SHA),
+                ("unavailable", ""),
+            ):
+                with self.subTest(mode=mode, freshness_case=freshness_case):
+                    completed, commands, outputs = self.run_jira_with_outputs(
+                        mode=mode,
+                        remote_base=[BASE_SHA, final_base],
+                        remote_head=remote_head,
+                        remote_parent=remote_parent,
+                        pr_head_sha=pr_head_sha,
+                    )
+
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn("Default branch", completed.stderr)
+                    self.assertIn(f"rev-parse {remote_head}^{{tree}}", commands)
+                    self.assert_no_push(commands)
+                    self.assertNotIn("commit_sha=", outputs)
 
     def test_jira_repair_accepts_expected_head_and_uses_exact_lease(self) -> None:
         completed, commands = self.run_jira(mode="repair", remote_head=HEAD_SHA)

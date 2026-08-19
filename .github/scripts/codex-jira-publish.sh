@@ -23,6 +23,7 @@ required_env "EXPECTED_BRANCH_NAME"
 required_env "EXPECTED_BASE_SHA"
 required_env "JIRA_PUBLISH_MODE"
 required_env "CODEX_RUNTIME_PATH"
+required_env "GITHUB_REPOSITORY"
 
 case "${JIRA_PUBLISH_MODE}" in
   initial)
@@ -53,6 +54,8 @@ verification_path="${verification_dir}/verification.env"
 pr_body_path="${verification_dir}/codex-pr-body.md"
 trusted_notify_path="${RUNNER_TEMP:-/tmp}/trusted-notify-jira-automation.py"
 notify_source_path="${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py"
+pr_recovery_path="${CODEX_RUNTIME_PATH}/.github/scripts/codex-recover-pr-state.py"
+pr_recovery_output="${RUNNER_TEMP:-/tmp}/codex-jira-pr-recovery.env"
 sanitized_home="${RUNNER_TEMP:-/tmp}/codex-jira-publish-home"
 sanitized_tmp="${RUNNER_TEMP:-/tmp}/codex-jira-publish-tmp"
 
@@ -161,6 +164,46 @@ persist_output() {
   fi
 }
 
+verify_default_unchanged() {
+  local remote_ref
+  local current_default_sha
+
+  if [[ ! "${verified_base_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Invalid expected default-branch SHA: ${verified_base_sha}" >&2
+    exit 1
+  fi
+  if ! remote_ref="$(git_authenticated ls-remote --exit-code --heads origin "refs/heads/${default_branch}")" || [[ -z "${remote_ref}" ]]; then
+    echo "::error title=Default branch unavailable::The current ${default_branch} revision could not be resolved before Jira publication." >&2
+    exit 1
+  fi
+  current_default_sha="$(awk '{print $1}' <<<"${remote_ref}")"
+  if [[ ! "${current_default_sha}" =~ ^[0-9a-f]{40}$ || "${current_default_sha}" != "${verified_base_sha}" ]]; then
+    echo "::error title=Default branch moved::The ${default_branch} branch changed before Jira publication." >&2
+    exit 1
+  fi
+}
+
+recover_pr_state() {
+  local allow_missing="${1:-false}"
+  local created_pr_url="${2:-}"
+  local recovery_args=(
+    --repository "${GITHUB_REPOSITORY}"
+    --base-ref "${default_branch}"
+    --head-ref "${branch_name}"
+    --head-sha "${commit_sha}"
+    --draft "${expected_pr_draft}"
+    --output "${pr_recovery_output}"
+  )
+
+  if [[ "${allow_missing}" == "true" ]]; then
+    recovery_args+=(--allow-missing)
+  fi
+  if [[ -n "${created_pr_url}" ]]; then
+    recovery_args+=(--pr-url "${created_pr_url}")
+  fi
+  python3 -I "${pr_recovery_path}" "${recovery_args[@]}"
+}
+
 mkdir -p "${sanitized_home}" "${sanitized_tmp}"
 
 if [[ ! -f "${notify_source_path}" || -L "${notify_source_path}" ]]; then
@@ -168,11 +211,21 @@ if [[ ! -f "${notify_source_path}" || -L "${notify_source_path}" ]]; then
   exit 1
 fi
 install -m 0500 "${notify_source_path}" "${trusted_notify_path}"
+if [[ ! -f "${pr_recovery_path}" || -L "${pr_recovery_path}" ]]; then
+  echo "Missing trusted pull request recovery runtime: ${pr_recovery_path}" >&2
+  exit 1
+fi
 
 branch_name="$(metadata_value branch_name)"
 verified_branch_name="$(verification_value branch_name)"
 verified_base_sha="$(verification_value base_sha)"
 verified_patch_sha="$(verification_value patch_sha)"
+expected_pr_draft="${PR_DRAFT:-false}"
+
+if [[ "${expected_pr_draft}" != "true" && "${expected_pr_draft}" != "false" ]]; then
+  echo "PR_DRAFT must be either true or false." >&2
+  exit 1
+fi
 
 if [[ "${branch_name}" != "${EXPECTED_BRANCH_NAME}" || "${branch_name}" != "${verified_branch_name}" || "${branch_name}" != codex/* ]]; then
   echo "Refusing to publish unexpected Codex branch name: ${branch_name}" >&2
@@ -211,11 +264,7 @@ print(subject[:72].rstrip())
 PY
 )"
 
-remote_base_sha="$(git_authenticated ls-remote --heads origin "refs/heads/${default_branch}" | awk '{print $1}')"
-if [[ -z "${remote_base_sha}" || "${remote_base_sha}" != "${verified_base_sha}" ]]; then
-  echo "::error title=Source revision moved::The remote ${default_branch} branch moved after credential-free verification. Re-run the workflow; the verified patch will not be applied to a newer base." >&2
-  exit 1
-fi
+verify_default_unchanged
 
 remote_branch_sha="$(git_authenticated ls-remote --heads origin "refs/heads/${branch_name}" | awk '{print $1}')"
 if [[ "${JIRA_PUBLISH_MODE}" == "repair" && -z "${remote_branch_sha}" ]]; then
@@ -238,12 +287,6 @@ git_authenticated \
 commit_sha="$(git_local rev-parse HEAD)"
 local_tree_sha="$(git_local rev-parse 'HEAD^{tree}')"
 
-latest_base_sha="$(git_authenticated ls-remote --heads origin "refs/heads/${default_branch}" | awk '{print $1}')"
-if [[ "${latest_base_sha}" != "${verified_base_sha}" ]]; then
-  echo "::error title=Source revision moved::The remote ${default_branch} branch moved while the verified commit was being prepared. Re-run the workflow; no stale branch will be pushed." >&2
-  exit 1
-fi
-
 latest_branch_sha="$(git_authenticated ls-remote --heads origin "refs/heads/${branch_name}" | awk '{print $1}')"
 if [[ "${JIRA_PUBLISH_MODE}" == "initial" ]]; then
   if [[ -z "${remote_branch_sha}" && -n "${latest_branch_sha}" ]]; then
@@ -251,6 +294,7 @@ if [[ "${JIRA_PUBLISH_MODE}" == "initial" ]]; then
     exit 1
   fi
   if [[ -z "${remote_branch_sha}" ]]; then
+    verify_default_unchanged
     git_authenticated push \
       --force-with-lease="refs/heads/${branch_name}:" \
       --set-upstream origin "${branch_name}"
@@ -264,6 +308,7 @@ if [[ "${JIRA_PUBLISH_MODE}" == "initial" ]]; then
       echo "::error title=Existing generated branch mismatch::The remote ${branch_name} branch does not have the exact verified base and generated tree. Refusing to create or recover a pull request." >&2
       exit 1
     fi
+    verify_default_unchanged
     commit_sha="${remote_branch_sha}"
     echo "Recovered exact previously pushed branch ${branch_name} at ${commit_sha}."
   else
@@ -276,6 +321,7 @@ else
     exit 1
   fi
   if [[ "${remote_branch_sha}" == "${expected_branch_head_sha}" ]]; then
+    verify_default_unchanged
     git_authenticated push \
       --force-with-lease="refs/heads/${branch_name}:${expected_branch_head_sha}" \
       --set-upstream origin "${branch_name}"
@@ -289,6 +335,7 @@ else
       echo "::error title=Existing repair branch mismatch::The remote ${branch_name} branch does not have the exact verified head and repaired tree. Refusing to recover publication." >&2
       exit 1
     fi
+    verify_default_unchanged
     commit_sha="${remote_branch_sha}"
     echo "Recovered exact previously pushed repair branch ${branch_name} at ${commit_sha}."
   else
@@ -300,8 +347,9 @@ fi
 persist_output branch_name "${branch_name}"
 persist_output commit_sha "${commit_sha}"
 
-pr_url="$(gh_authenticated pr list --repo "${GITHUB_REPOSITORY}" --base "${default_branch}" --head "${branch_name}" --state open --json url --jq '.[0].url // empty')"
-if [[ -z "${pr_url}" ]]; then
+recover_pr_state true
+pr_found="$(awk -F= '$1 == "found" { print $2; exit }' "${pr_recovery_output}")"
+if [[ "${pr_found}" != "true" ]]; then
   create_args=(
     pr create
     --repo "${GITHUB_REPOSITORY}"
@@ -310,28 +358,24 @@ if [[ -z "${pr_url}" ]]; then
     --title "${ISSUE_KEY}: ${ISSUE_SUMMARY}"
     --body-file "${pr_body_path}"
   )
-  if [[ "${PR_DRAFT:-false}" == "true" ]]; then
+  if [[ "${expected_pr_draft}" == "true" ]]; then
     create_args+=(--draft)
   fi
-  pr_url="$(gh_authenticated "${create_args[@]}")"
+  created_pr_url="$(gh_authenticated "${create_args[@]}")"
+  recover_pr_state false "${created_pr_url}"
 fi
+pr_url="$(awk -F= '$1 == "pr_url" { sub(/^[^=]*=/, ""); print; exit }' "${pr_recovery_output}")"
+pr_number="$(awk -F= '$1 == "pr_number" { print $2; exit }' "${pr_recovery_output}")"
 persist_output pr_url "${pr_url}"
-
-pr_identity="$(gh_authenticated pr view "${pr_url}" --repo "${GITHUB_REPOSITORY}" --json number,baseRefName,headRefName,headRefOid --jq '[.number, .baseRefName, .headRefName, .headRefOid] | @tsv')"
-IFS=$'\t' read -r pr_number pr_base_ref pr_head_ref pr_head_sha <<<"${pr_identity}"
-if [[ -z "${pr_number}" || "${pr_base_ref}" != "${default_branch}" || "${pr_head_ref}" != "${branch_name}" || "${pr_head_sha}" != "${commit_sha}" ]]; then
-  echo "::error title=Published PR identity mismatch::The pull request does not have the exact verified base, branch and head commit (${default_branch}, ${branch_name}, ${commit_sha})." >&2
-  exit 1
-fi
 persist_output pr_number "${pr_number}"
 
 verification_status="passed"
-if [[ "${PR_DRAFT:-false}" == "true" ]]; then
+if [[ "${expected_pr_draft}" == "true" ]]; then
   verification_status="failed"
 fi
 run_notify \
   --pr-url "${pr_url}" \
   --branch-name "${branch_name}" \
   --commit-sha "${commit_sha}" \
-  --draft "${PR_DRAFT:-false}" \
+  --draft "${expected_pr_draft}" \
   --verification-status "${verification_status}"

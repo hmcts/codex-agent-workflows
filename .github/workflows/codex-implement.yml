@@ -1650,12 +1650,14 @@ jobs:
           BRANCH_NAME: ${{ steps.publish.outputs.branch_name }}
           COMMIT_SHA: ${{ steps.publish.outputs.commit_sha }}
         run: |
-          pr_json="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "${BRANCH_NAME}" --state open --json number,url,headRefOid --jq '.[0]')"
-          test "$(jq -r '.headRefOid // empty' <<<"${pr_json}")" = "${COMMIT_SHA}"
-          echo "branch_name=${BRANCH_NAME}" >>"$GITHUB_OUTPUT"
-          echo "commit_sha=${COMMIT_SHA}" >>"$GITHUB_OUTPUT"
-          echo "pr_url=$(jq -r .url <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
-          echo "pr_number=$(jq -r .number <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-recover-pr-state.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --base-ref "$DEFAULT_BRANCH" \
+            --head-ref "$BRANCH_NAME" \
+            --head-sha "$COMMIT_SHA" \
+            --draft true \
+            --output "$GITHUB_OUTPUT" \
+            --append-output
 
       - name: Retry Jira callback after partial draft publication
         if: always() && steps.publish.outcome == 'failure' && steps.state.outcome == 'success'
@@ -1808,12 +1810,14 @@ jobs:
           BRANCH_NAME: ${{ steps.publish.outputs.branch_name }}
           COMMIT_SHA: ${{ steps.publish.outputs.commit_sha }}
         run: |
-          pr_json="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "${BRANCH_NAME}" --state open --json number,url,headRefOid --jq '.[0]')"
-          test "$(jq -r '.headRefOid // empty' <<<"${pr_json}")" = "${COMMIT_SHA}"
-          echo "branch_name=${BRANCH_NAME}" >>"$GITHUB_OUTPUT"
-          echo "commit_sha=${COMMIT_SHA}" >>"$GITHUB_OUTPUT"
-          echo "pr_url=$(jq -r .url <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
-          echo "pr_number=$(jq -r .number <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-recover-pr-state.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --base-ref "$DEFAULT_BRANCH" \
+            --head-ref "$BRANCH_NAME" \
+            --head-sha "$COMMIT_SHA" \
+            --draft false \
+            --output "$GITHUB_OUTPUT" \
+            --append-output
 
       - name: Retry Jira callback after partial publication
         if: always() && steps.publish.outcome == 'failure' && steps.state.outcome == 'success'
@@ -2367,12 +2371,14 @@ jobs:
           BRANCH_NAME: ${{ steps.publish.outputs.branch_name }}
           COMMIT_SHA: ${{ steps.publish.outputs.commit_sha }}
         run: |
-          pr_json="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "${BRANCH_NAME}" --state open --json number,url,headRefOid --jq '.[0]')"
-          test "$(jq -r '.headRefOid // empty' <<<"${pr_json}")" = "${COMMIT_SHA}"
-          echo "branch_name=${BRANCH_NAME}" >>"$GITHUB_OUTPUT"
-          echo "commit_sha=${COMMIT_SHA}" >>"$GITHUB_OUTPUT"
-          echo "pr_url=$(jq -r .url <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
-          echo "pr_number=$(jq -r .number <<<"${pr_json}")" >>"$GITHUB_OUTPUT"
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-recover-pr-state.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --base-ref "$DEFAULT_BRANCH" \
+            --head-ref "$BRANCH_NAME" \
+            --head-sha "$COMMIT_SHA" \
+            --draft false \
+            --output "$GITHUB_OUTPUT" \
+            --append-output
 
       - name: Retry Jira callback after partial repair publication
         if: always() && steps.publish.outcome == 'failure' && steps.state.outcome == 'success'

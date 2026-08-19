@@ -106,7 +106,16 @@ def comments_by_review_id(
     grouped: dict[int, list[dict[str, Any]]] = {}
     for comment in review_comments:
         review_id = numeric_id(comment.get("pull_request_review_id"))
-        if review_id is not None:
+        user = comment.get("user")
+        association = str(comment.get("author_association") or "").upper()
+        login = user.get("login") if isinstance(user, dict) else None
+        if (
+            review_id is not None
+            and reviewer_identity(comment) is not None
+            and association in TRUSTED_ASSOCIATIONS
+            and isinstance(login, str)
+            and login.strip()
+        ):
             grouped.setdefault(review_id, []).append(comment)
     return grouped
 
@@ -181,12 +190,18 @@ def format_review_environment(
 
     formatted_comments = []
     for index, comment in enumerate(comments, start=1):
+        user = comment.get("user") if isinstance(comment.get("user"), dict) else {}
+        author = str(user.get("login") or "").strip()
+        association = str(comment.get("author_association") or "").upper()
         path = str(comment.get("path") or "").strip()
         url = str(comment.get("html_url") or "").strip()
         diff_hunk = str(comment.get("diff_hunk") or "").strip()
         body = str(comment.get("body") or "").strip()
 
-        parts = [f"Inline comment {index}:"]
+        parts = [
+            f"Inline comment {index}:",
+            f"Author: @{author} ({association})",
+        ]
         if url:
             parts.append(f"URL: {url}")
         if path:

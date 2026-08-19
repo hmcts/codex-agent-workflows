@@ -292,6 +292,23 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("Default branch unavailable", publisher)
         self.assertIn("Default branch moved", publisher)
 
+    def test_jira_publication_revalidates_default_at_push_and_recovery(self):
+        publisher = (ROOT / "scripts" / "codex-jira-publish.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(
+            publisher.count("verify_default_unchanged\n    git_authenticated push"),
+            2,
+        )
+        self.assertEqual(
+            publisher.count(
+                'verify_default_unchanged\n    commit_sha="${remote_branch_sha}"'
+            ),
+            2,
+        )
+        self.assertIn("Default branch unavailable", publisher)
+        self.assertIn("Default branch moved", publisher)
+
     def test_review_reusable_workflow_accepts_only_safe_issue_comments(self):
         content = REVIEW_WORKFLOW.read_text(encoding="utf-8")
         start = content.index("  detect-codex-pr:")
@@ -393,7 +410,23 @@ class WorkflowContractTests(unittest.TestCase):
                 "steps.state.outputs.pr_number || steps.publish.outputs.pr_number", job
             )
             self.assertIn("if: always() && steps.publish.outputs.commit_sha != ''", job)
-            self.assertIn("--json number,url,headRefOid", job)
+            self.assertIn("codex-recover-pr-state.py", job)
+            self.assertIn('--repository "$GITHUB_REPOSITORY"', job)
+            self.assertIn('--base-ref "$DEFAULT_BRANCH"', job)
+            self.assertIn('--head-ref "$BRANCH_NAME"', job)
+            self.assertIn('--head-sha "$COMMIT_SHA"', job)
+            self.assertIn("--append-output", job)
+
+        draft_start = content.index("  publish-draft-pr:")
+        draft_end = content.index("\n  publish-pr:", draft_start)
+        self.assertIn("--draft true", content[draft_start:draft_end])
+        for job_name, next_job_name in (
+            ("publish-pr", "verify-published-pr-patch"),
+            ("publish-published-pr-repair-1", "verify-published-pr-1-patch"),
+        ):
+            start = content.index(f"  {job_name}:")
+            end = content.index(f"\n  {next_job_name}:", start)
+            self.assertIn("--draft false", content[start:end])
 
     def test_release_updater_validates_before_branch_mutation_and_resets_stale_branch(self):
         content = UPDATER_WORKFLOW.read_text(encoding="utf-8")

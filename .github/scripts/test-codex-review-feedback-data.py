@@ -54,6 +54,30 @@ def completed(
     )
 
 
+def comment(
+    comment_id: int,
+    review_id: int,
+    user_id: int,
+    *,
+    body: str,
+    login: str | None = None,
+    association: str | None = "MEMBER",
+) -> dict[str, object]:
+    return {
+        "id": comment_id,
+        "pull_request_review_id": review_id,
+        "user": {
+            "id": user_id,
+            "node_id": f"USER_{user_id}",
+            "login": login or f"commenter-{user_id}",
+        },
+        "author_association": association,
+        "body": body,
+        "path": "src/example.py",
+        "html_url": f"https://example.test/comments/{comment_id}",
+    }
+
+
 class ReviewSelectionTests(unittest.TestCase):
     def test_approval_supersedes_change_request_for_same_stable_reviewer(self):
         reviews = [
@@ -133,6 +157,77 @@ class ReviewSelectionTests(unittest.TestCase):
 
         self.assertEqual(selected["id"], 70)
 
+    def test_mixed_review_thread_excludes_untrusted_and_malformed_replies(self):
+        selected_review = review(
+            80,
+            8,
+            "COMMENTED",
+            "2026-08-19T10:00:00Z",
+            body="",
+        )
+        trusted = comment(801, 80, 8, body="trusted feedback", login="reviewer")
+        untrusted = comment(
+            802,
+            80,
+            9,
+            body="untrusted reply",
+            login="outsider",
+            association="CONTRIBUTOR",
+        )
+        missing_association = comment(
+            803,
+            80,
+            10,
+            body="missing association",
+            association=None,
+        )
+        malformed = comment(804, 80, 11, body="malformed identity")
+        malformed["user"] = {"login": "no-stable-id"}
+
+        selected, comments = MODULE.select_actionable_review(
+            [selected_review],
+            [untrusted, missing_association, malformed, trusted],
+        )
+
+        self.assertEqual(selected["id"], 80)
+        self.assertEqual([item["id"] for item in comments], [801])
+        environment = MODULE.format_review_environment(selected, comments)
+        self.assertIn("Author: @reviewer (MEMBER)", environment)
+        self.assertIn("trusted feedback", environment)
+        self.assertNotIn("untrusted reply", environment)
+        self.assertNotIn("missing association", environment)
+        self.assertNotIn("malformed identity", environment)
+
+    def test_multiple_trusted_commenters_preserve_each_attribution(self):
+        selected_review = review(
+            90,
+            9,
+            "CHANGES_REQUESTED",
+            "2026-08-19T10:00:00Z",
+            body="",
+        )
+        comments = [
+            comment(901, 90, 9, body="reviewer feedback", login="reviewer"),
+            comment(
+                902,
+                90,
+                10,
+                body="maintainer follow-up",
+                login="maintainer",
+                association="OWNER",
+            ),
+        ]
+
+        selected, selected_comments = MODULE.select_actionable_review(
+            [selected_review], comments
+        )
+
+        self.assertEqual(selected["id"], 90)
+        self.assertEqual(len(selected_comments), 2)
+        environment = MODULE.format_review_environment(selected, selected_comments)
+        self.assertIn("Author: @reviewer (MEMBER)", environment)
+        self.assertIn("Author: @maintainer (OWNER)", environment)
+
 
 class PaginatedCollectionTests(unittest.TestCase):
     def test_page_boundaries_flatten_all_records_and_select_later_page_feedback(self):
@@ -153,20 +248,22 @@ class PaginatedCollectionTests(unittest.TestCase):
             body="later page feedback",
         )
         first_comment_page = [
-            {
-                "id": comment_id,
-                "pull_request_review_id": comment_id,
-                "body": f"comment {comment_id}",
-            }
+            comment(
+                comment_id,
+                comment_id,
+                comment_id,
+                body=f"comment {comment_id}",
+            )
             for comment_id in range(1, 101)
         ]
-        latest_comment = {
-            "id": 2001,
-            "pull_request_review_id": 1001,
-            "body": "newest inline feedback",
-            "path": "src/latest.py",
-            "html_url": "https://example.test/comments/2001",
-        }
+        latest_comment = comment(
+            2001,
+            1001,
+            1001,
+            body="newest inline feedback",
+            login="later-page-reviewer",
+        )
+        latest_comment["path"] = "src/latest.py"
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary = Path(temporary_directory)
@@ -203,6 +300,7 @@ class PaginatedCollectionTests(unittest.TestCase):
             self.assertIn("later page feedback", environment)
             self.assertIn("newest inline feedback", environment)
             self.assertIn("src/latest.py", environment)
+            self.assertIn("Author: @later-page-reviewer (MEMBER)", environment)
             self.assertEqual(run.call_count, 2)
             self.assertEqual(
                 run.call_args_list[0].args[0],
