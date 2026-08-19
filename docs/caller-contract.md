@@ -17,6 +17,8 @@ Each trusted publisher job mints a short-lived GitHub App installation token res
 
 Callers must pass `CODEX_JIRA_PR_NOTIFY_URL` to both the implementation and PR-review reusable workflows. Terminal Jenkins, Sonar or credential-free verification failures return the PR to draft, attach the final evidence and notify Jira from a fresh trusted job.
 
+The trusted plan-validation job retains the complete normalised `plan.json`, its SHA-256 file and the approved path list as the `codex-validated-plan` workflow artefact for 30 days. Planning or trusted validation failures attempt a terminal Jira callback containing the workflow run URL before implementation starts.
+
 The same App may authenticate Azure Function workflow dispatches, provided it has `Actions: read and write` and is installed on every caller repository. Dispatch tokens are minted separately and restricted to the selected repository.
 
 ## Required repository files

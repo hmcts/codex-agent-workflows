@@ -110,8 +110,17 @@ jobs:
             fi
 
             blob_sha="$(jq -r .sha <<<"${metadata}")"
-            content="$(jq -r .content <<<"${metadata}" | base64 --decode)"
-            updated="$(sed -E "s#(hmcts/codex-agent-workflows/.github/workflows/[^@]+@)[0-9a-f]{40}#\\1${RELEASE_SHA}#g" <<<"${content}")"
+            input_path="$(mktemp)"
+            output_path="$(mktemp)"
+            jq -r .content <<<"${metadata}" | base64 --decode >"${input_path}"
+            python3 -I .github/scripts/update-caller-workflow.py \
+              --workflow "${path}" \
+              --release-sha "${RELEASE_SHA}" \
+              --input "${input_path}" \
+              --output "${output_path}"
+            content="$(cat "${input_path}")"
+            updated="$(cat "${output_path}")"
+            rm -f "${input_path}" "${output_path}"
             if [[ "${updated}" == "${content}" ]]; then
               continue
             fi

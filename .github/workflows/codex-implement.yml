@@ -181,6 +181,14 @@ jobs:
           OUTPUT_DIR: ${{ runner.temp }}/codex-plan
         run: ${CODEX_RUNTIME_PATH}/.github/scripts/validate-codex-plan.py
 
+      - name: Upload validated Codex plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-validated-plan
+          path: ${{ runner.temp }}/codex-plan
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Record non-sensitive planning audit
         env:
           READY_TO_IMPLEMENT: ${{ steps.validate.outputs.ready_to_implement }}
@@ -195,6 +203,55 @@ jobs:
             echo "- Planned file count: \`${PLANNED_PATH_COUNT}\`"
             echo "- Plan SHA-256: \`${PLAN_SHA256}\`"
           } >>"${GITHUB_STEP_SUMMARY}"
+
+  codex-plan-failed:
+    needs: [codex-plan-action, validate-codex-plan]
+    if: >-
+      ${{
+        always() &&
+        (
+          needs.codex-plan-action.result != 'success' ||
+          needs.validate-codex-plan.result != 'success'
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@c9d374f423bea72f223b157fd54a96e5d53b207c
+
+      - name: Notify Jira that planning failed
+        continue-on-error: true
+        env:
+          PLANNER_RESULT: ${{ needs.codex-plan-action.result }}
+          VALIDATOR_RESULT: ${{ needs.validate-codex-plan.result }}
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --status failed \
+            --message "Planning failed before implementation. Planner: ${PLANNER_RESULT}; validator: ${VALIDATOR_RESULT}. See the workflow run for details."
+
+      - name: Stop workflow with terminal planning failure
+        env:
+          PLANNER_RESULT: ${{ needs.codex-plan-action.result }}
+          VALIDATOR_RESULT: ${{ needs.validate-codex-plan.result }}
+        run: |
+          {
+            echo "### Codex planning failed"
+            echo
+            echo "- Planner job: \`${PLANNER_RESULT}\`"
+            echo "- Validator job: \`${VALIDATOR_RESULT}\`"
+            echo
+            echo "No implementation or pull request was created. A Jira failure callback was attempted with this workflow run URL."
+          } >>"${GITHUB_STEP_SUMMARY}"
+          echo "::error title=Codex planning failed::Planning or trusted plan validation failed before implementation."
+          exit 1
 
   codex-plan-blocked:
     needs: validate-codex-plan
