@@ -45,6 +45,14 @@ jobs:
             bash -n "${script}"
           done
 
+      - name: Check Ruby syntax
+        run: |
+          set -euo pipefail
+          ruby -c .github/scripts/check-codex-pr-safety.rb
+          for source in .github/scripts/lib/codex_workflow_safety/*.rb; do
+            ruby -c "${source}"
+          done
+
       - name: Lint GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck= .github/workflows/*.yml
 
