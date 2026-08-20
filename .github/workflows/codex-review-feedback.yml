@@ -65,7 +65,7 @@ jobs:
       contents: read
       pull-requests: read
       issues: read
-    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-intake.yml@ad3dd7f39a2529b684325e05f7d2914d1d9f49ce
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-intake.yml@42d09aa0acad3ad37118a4d16b16e322a6c66e85
 
   generate-and-verify:
     needs: intake
@@ -74,7 +74,7 @@ jobs:
       contents: read
       pull-requests: read
       issues: read
-    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-generate.yml@ad3dd7f39a2529b684325e05f7d2914d1d9f49ce
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-generate.yml@42d09aa0acad3ad37118a4d16b16e322a6c66e85
     with:
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
@@ -89,7 +89,7 @@ jobs:
     if: always() && needs.intake.outputs.is_codex_pr == 'true' && needs.generate-and-verify.outputs.passed == 'true'
     permissions:
       contents: read
-    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-publish.yml@ad3dd7f39a2529b684325e05f7d2914d1d9f49ce
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-publish.yml@42d09aa0acad3ad37118a4d16b16e322a6c66e85
     with:
       github_app_client_id: ${{ inputs.github_app_client_id }}
       sonar_host_url: ${{ inputs.sonar_host_url }}
@@ -113,7 +113,7 @@ jobs:
     if: always() && needs.publish.outputs.commit_sha != '' && needs.publish.outputs.passed == 'false'
     permissions:
       contents: read
-    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-repair.yml@ad3dd7f39a2529b684325e05f7d2914d1d9f49ce
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-repair.yml@42d09aa0acad3ad37118a4d16b16e322a6c66e85
     with:
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
@@ -145,7 +145,7 @@ jobs:
     if: always() && needs.intake.outputs.is_codex_pr == 'true'
     permissions:
       contents: read
-    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-terminal.yml@ad3dd7f39a2529b684325e05f7d2914d1d9f49ce
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-terminal.yml@42d09aa0acad3ad37118a4d16b16e322a6c66e85
     with:
       github_app_client_id: ${{ inputs.github_app_client_id }}
       jira_notify_timeout_seconds: ${{ inputs.jira_notify_timeout_seconds }}
