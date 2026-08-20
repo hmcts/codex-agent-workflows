@@ -1,0 +1,267 @@
+name: Codex plan stage
+
+on:
+  workflow_call:
+    inputs:
+      issueKey:
+        required: true
+        type: string
+      summary:
+        required: true
+        type: string
+      description:
+        required: true
+        type: string
+      status:
+        required: true
+        type: string
+      assignee:
+        required: true
+        type: string
+      issueUrl:
+        required: true
+        type: string
+      initiatorDisplayName:
+        required: false
+        default: ''
+        type: string
+      runner_label:
+        required: true
+        type: string
+      node_version:
+        required: false
+        default: "22"
+        type: string
+      jira_notify_timeout_seconds:
+        required: false
+        default: "10"
+        type: string
+    outputs:
+      ready_to_implement:
+        value: ${{ jobs.validate-codex-plan.outputs.ready_to_implement }}
+      plan_sha256:
+        value: ${{ jobs.validate-codex-plan.outputs.plan_sha256 }}
+      plan_payload:
+        value: ${{ jobs.validate-codex-plan.outputs.plan_payload }}
+      planned_path_count:
+        value: ${{ jobs.validate-codex-plan.outputs.planned_path_count }}
+      blockers_summary:
+        value: ${{ jobs.validate-codex-plan.outputs.blockers_summary }}
+      trusted_sha:
+        value: ${{ jobs.validate-codex-plan.outputs.trusted_sha }}
+    secrets:
+      CODEX_OPENAI_API_KEY:
+        required: true
+      CODEX_JIRA_PR_NOTIFY_URL:
+        required: true
+
+jobs:
+  codex-plan-action:
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      codex_result: ${{ steps.codex-action.outputs.final-message }}
+      trusted_sha: ${{ steps.trusted.outputs.sha }}
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_SUMMARY: ${{ inputs.summary }}
+      ISSUE_DESCRIPTION: ${{ inputs.description }}
+      ISSUE_STATUS: ${{ inputs.status }}
+      ISSUE_ASSIGNEE: ${{ inputs.assignee }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+
+      - name: Checkout default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DEFAULT_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Capture trusted checkout SHA
+        id: trusted
+        run: echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+      - name: Verify runner toolchain
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-runner-preflight.sh
+
+      - name: Prepare read-only planning prompt
+        id: prepare
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-plan.sh
+
+      - name: Plan implementation
+        id: codex-action
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        with:
+          allow-bot-users: hmcts-pr-publisher[bot]
+          openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
+          responses-api-endpoint: https://eu.api.openai.com/v1/responses
+          codex-version: '0.146.0'
+          model: gpt-5.6-sol
+          effort: ultra
+          prompt-file: ${{ steps.prepare.outputs.prompt_path }}
+          output-schema-file: ${{ steps.prepare.outputs.schema_path }}
+          working-directory: .
+          permission-profile: ":read-only"
+          safety-strategy: unprivileged-user
+          codex-user: codex
+          codex-args: '["--ephemeral"]'
+
+  validate-codex-plan:
+    needs: codex-plan-action
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      ready_to_implement: ${{ steps.validate.outputs.ready_to_implement }}
+      plan_sha256: ${{ steps.validate.outputs.plan_sha256 }}
+      plan_payload: ${{ steps.validate.outputs.plan_payload }}
+      planned_path_count: ${{ steps.validate.outputs.planned_path_count }}
+      blockers_summary: ${{ steps.validate.outputs.blockers_summary }}
+      trusted_sha: ${{ steps.trusted.outputs.sha }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+
+      - name: Checkout trusted plan validator
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.codex-plan-action.outputs.trusted_sha }}
+          persist-credentials: false
+
+      - name: Confirm trusted checkout SHA
+        id: trusted
+        env:
+          EXPECTED_TRUSTED_SHA: ${{ needs.codex-plan-action.outputs.trusted_sha }}
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          test "${actual_sha}" = "${EXPECTED_TRUSTED_SHA}"
+          echo "sha=${actual_sha}" >>"$GITHUB_OUTPUT"
+
+      - name: Validate and normalise Codex plan
+        id: validate
+        env:
+          CODEX_PLAN_RESULT: ${{ needs.codex-plan-action.outputs.codex_result }}
+          OUTPUT_DIR: ${{ runner.temp }}/codex-plan
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/validate-codex-plan.py
+
+      - name: Upload validated Codex plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-validated-plan
+          path: ${{ runner.temp }}/codex-plan
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Record non-sensitive planning audit
+        env:
+          READY_TO_IMPLEMENT: ${{ steps.validate.outputs.ready_to_implement }}
+          PLAN_SHA256: ${{ steps.validate.outputs.plan_sha256 }}
+          PLANNED_PATH_COUNT: ${{ steps.validate.outputs.planned_path_count }}
+        run: |
+          {
+            echo "### Codex planning audit"
+            echo
+            echo "- Ready to implement: \`${READY_TO_IMPLEMENT}\`"
+            echo "- Plan approval: \`automatic after trusted validation\`"
+            echo "- Planned file count: \`${PLANNED_PATH_COUNT}\`"
+            echo "- Plan SHA-256: \`${PLAN_SHA256}\`"
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+  codex-plan-failed:
+    needs: [codex-plan-action, validate-codex-plan]
+    if: >-
+      ${{
+        always() &&
+        (
+          needs.codex-plan-action.result != 'success' ||
+          needs.validate-codex-plan.result != 'success'
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+
+      - name: Notify Jira that planning failed
+        continue-on-error: true
+        env:
+          PLANNER_RESULT: ${{ needs.codex-plan-action.result }}
+          VALIDATOR_RESULT: ${{ needs.validate-codex-plan.result }}
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --status failed \
+            --message "Planning failed before implementation. Planner: ${PLANNER_RESULT}; validator: ${VALIDATOR_RESULT}. See the workflow run for details."
+
+      - name: Stop workflow with terminal planning failure
+        env:
+          PLANNER_RESULT: ${{ needs.codex-plan-action.result }}
+          VALIDATOR_RESULT: ${{ needs.validate-codex-plan.result }}
+        run: |
+          {
+            echo "### Codex planning failed"
+            echo
+            echo "- Planner job: \`${PLANNER_RESULT}\`"
+            echo "- Validator job: \`${VALIDATOR_RESULT}\`"
+            echo
+            echo "No implementation or pull request was created. A Jira failure callback was attempted with this workflow run URL."
+          } >>"${GITHUB_STEP_SUMMARY}"
+          echo "::error title=Codex planning failed::Planning or trusted plan validation failed before implementation."
+          exit 1
+
+  codex-plan-blocked:
+    needs: validate-codex-plan
+    if: needs.validate-codex-plan.outputs.ready_to_implement == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_SUMMARY: ${{ inputs.summary }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+
+      - name: Notify Jira that implementation is blocked
+        continue-on-error: true
+        env:
+          BLOCKERS_SUMMARY: ${{ needs.validate-codex-plan.outputs.blockers_summary }}
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --status blocked \
+            --message "${BLOCKERS_SUMMARY}"
+
+      - name: Stop workflow with terminal blocked result
+        env:
+          PLAN_SHA256: ${{ needs.validate-codex-plan.outputs.plan_sha256 }}
+        run: |
+          {
+            echo "### Codex planning blocked"
+            echo
+            echo "No implementation or pull request was created. Review the Jira ticket and this workflow run."
+            echo
+            echo "Plan SHA-256: \`${PLAN_SHA256}\`"
+          } >>"${GITHUB_STEP_SUMMARY}"
+          echo "::error title=Codex plan blocked::The validated plan is not ready to implement; no implementation or pull request was created."
+          exit 1
+

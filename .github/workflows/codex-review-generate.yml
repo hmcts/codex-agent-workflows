@@ -1,0 +1,332 @@
+name: Codex review generation and verification
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        required: true
+        type: string
+      node_version:
+        required: false
+        default: "22"
+        type: string
+      is_codex_pr:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      head_ref:
+        required: true
+        type: string
+    outputs:
+      should_run:
+        value: ${{ jobs.codex-review-generate-action.outputs.should_run }}
+      skip_reason:
+        value: ${{ jobs.codex-review-generate-action.outputs.skip_reason }}
+      pr_number:
+        value: ${{ jobs.codex-review-generate-action.outputs.pr_number }}
+      head_ref:
+        value: ${{ jobs.codex-review-generate-action.outputs.head_ref }}
+      base_ref:
+        value: ${{ jobs.codex-review-generate-action.outputs.base_ref }}
+      head_sha:
+        value: ${{ jobs.codex-review-generate-action.outputs.head_sha }}
+      base_sha:
+        value: ${{ jobs.codex-review-generate-action.outputs.base_sha }}
+      comment_author:
+        value: ${{ jobs.codex-review-generate-action.outputs.comment_author }}
+      comment_url:
+        value: ${{ jobs.codex-review-generate-action.outputs.comment_url }}
+      trusted_sha:
+        value: ${{ jobs.codex-review-generate.outputs.trusted_sha }}
+      passed:
+        value: ${{ jobs.codex-review-verify.outputs.passed }}
+      failure_artifact:
+        value: ${{ jobs.codex-review-verify.outputs.failure_artifact }}
+    secrets:
+      CODEX_OPENAI_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  codex-review-generate-action:
+    if: inputs.is_codex_pr == 'true'
+    runs-on: ${{ inputs.runner_label }}
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      should_run: ${{ steps.prepare.outputs.should_run }}
+      skip_reason: ${{ steps.prepare.outputs.skip_reason }}
+      pr_number: ${{ steps.prepare.outputs.pr_number }}
+      head_ref: ${{ steps.prepare.outputs.head_ref }}
+      base_ref: ${{ steps.prepare.outputs.base_ref }}
+      head_sha: ${{ steps.prepare.outputs.head_sha }}
+      base_sha: ${{ steps.prepare.outputs.base_sha }}
+      comment_author: ${{ steps.prepare.outputs.comment_author }}
+      comment_url: ${{ steps.prepare.outputs.comment_url }}
+      codex_result: ${{ steps.codex-action.outputs.final-message }}
+      trusted_sha: ${{ steps.trusted.outputs.sha }}
+    timeout-minutes: 120
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+
+      - name: Checkout default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DEFAULT_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Capture trusted checkout SHA
+        id: trusted
+        run: echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+      - name: Verify runner toolchain
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-runner-preflight.sh
+
+      - name: Prepare review-feedback prompt
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-feedback.sh
+
+      - name: Run Codex on review feedback
+        id: codex-action
+        if: steps.prepare.outputs.prompt_path != ''
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        with:
+          allow-bot-users: hmcts-pr-publisher[bot]
+          openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
+          responses-api-endpoint: https://eu.api.openai.com/v1/responses
+          codex-version: '0.146.0'
+          model: gpt-5.6-sol
+          effort: medium
+          prompt-file: ${{ steps.prepare.outputs.prompt_path }}
+          output-schema-file: ${{ steps.prepare.outputs.schema_path }}
+          working-directory: .
+          permission-profile: ":workspace"
+          safety-strategy: unprivileged-user
+          codex-user: codex
+          codex-args: '["--ephemeral"]'
+
+  codex-review-generate:
+    needs: codex-review-generate-action
+    if: inputs.is_codex_pr == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      trusted_sha: ${{ steps.trusted.outputs.sha }}
+    timeout-minutes: 10
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+
+      - name: Checkout trusted collector
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.codex-review-generate-action.outputs.trusted_sha }}
+          persist-credentials: false
+
+      - name: Confirm trusted checkout SHA
+        id: trusted
+        env:
+          EXPECTED_TRUSTED_SHA: ${{ needs.codex-review-generate-action.outputs.trusted_sha }}
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          test "${actual_sha}" = "${EXPECTED_TRUSTED_SHA}"
+          echo "sha=${actual_sha}" >>"$GITHUB_OUTPUT"
+
+      - name: Materialise review-feedback patch
+        env:
+          CODEX_SHOULD_RUN: ${{ needs.codex-review-generate-action.outputs.should_run }}
+          CODEX_SKIP_REASON: ${{ needs.codex-review-generate-action.outputs.skip_reason }}
+          CODEX_RESULT: ${{ needs.codex-review-generate-action.outputs.codex_result }}
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          PR_NUMBER: ${{ needs.codex-review-generate-action.outputs.pr_number }}
+          HEAD_REF: ${{ needs.codex-review-generate-action.outputs.head_ref }}
+          BASE_REF: ${{ needs.codex-review-generate-action.outputs.base_ref }}
+          HEAD_SHA: ${{ needs.codex-review-generate-action.outputs.head_sha }}
+          BASE_SHA: ${{ needs.codex-review-generate-action.outputs.base_sha }}
+          COMMENT_AUTHOR: ${{ needs.codex-review-generate-action.outputs.comment_author }}
+          COMMENT_URL: ${{ needs.codex-review-generate-action.outputs.comment_url }}
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-collect.sh
+
+      - name: Upload Codex review output
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-review-output
+          path: ${{ runner.temp }}/codex-output
+          if-no-files-found: error
+          retention-days: 1
+
+  prepare-review-verification-source:
+    needs: [codex-review-generate-action, codex-review-generate]
+    if: needs.codex-review-generate-action.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      artifact: codex-review-verification-source
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+
+      - name: Checkout trusted verifier tools
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.codex-review-generate.outputs.trusted_sha }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Checkout exact PR source revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.codex-review-generate-action.outputs.head_sha }}
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+
+      - name: Build credential-free review source
+        env:
+          HEAD_REF: ${{ needs.codex-review-generate-action.outputs.head_ref }}
+          BASE_REF: ${{ needs.codex-review-generate-action.outputs.base_ref }}
+          HEAD_SHA: ${{ needs.codex-review-generate-action.outputs.head_sha }}
+          BASE_SHA: ${{ needs.codex-review-generate-action.outputs.base_sha }}
+        run: |
+          cd source
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git update-ref "refs/remotes/origin/${HEAD_REF}" "$HEAD_SHA"
+          git update-ref "refs/remotes/origin/${BASE_REF}" "$BASE_SHA"
+          test -z "$(git config --local --get-all http.https://github.com/.extraheader || true)"
+          test -z "$(git config --local --get-all credential.helper || true)"
+          tar -czf "$RUNNER_TEMP/codex-review-source.tar.gz" .
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb "$RUNNER_TEMP/trusted-check-codex-pr-safety.rb"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh "$RUNNER_TEMP/trusted-codex-prepare-policy-candidate.sh"
+          cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
+
+      - name: Upload credential-free review source
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-review-verification-source
+          path: |
+            ${{ runner.temp }}/codex-review-source.tar.gz
+            ${{ runner.temp }}/trusted-codex-pr-review-verify.sh
+            ${{ runner.temp }}/trusted-check-codex-pr-safety.rb
+            ${{ runner.temp }}/trusted-codex-prepare-policy-candidate.sh
+            ${{ runner.temp }}/trusted-codex-local-pipeline.sh
+          if-no-files-found: error
+          retention-days: 1
+
+  codex-review-verify:
+    needs: [codex-review-generate-action, codex-review-generate, prepare-review-verification-source]
+    if: inputs.is_codex_pr == 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 60
+    outputs:
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
+      failure_artifact: codex-review-verification-failure
+    env:
+      EXPECTED_PR_NUMBER: ${{ inputs.pr_number }}
+      EXPECTED_HEAD_REF: ${{ inputs.head_ref }}
+      EXPECTED_BASE_REF: ${{ needs.codex-review-generate-action.outputs.base_ref }}
+      EXPECTED_HEAD_SHA: ${{ needs.codex-review-generate-action.outputs.head_sha }}
+      EXPECTED_BASE_SHA: ${{ needs.codex-review-generate-action.outputs.base_sha }}
+      LOCAL_PIPELINE_MODE: fast
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+
+      - name: Download credential-free review source
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-review-verification-source.outputs.artifact }}
+          path: ${{ runner.temp }}/codex-review-verification-source
+
+      - name: Restore credential-free review source
+        run: tar -xzf "$RUNNER_TEMP/codex-review-verification-source/codex-review-source.tar.gz" -C "$GITHUB_WORKSPACE"
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Download Codex review output
+        uses: actions/download-artifact@v8
+        with:
+          name: codex-review-output
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Verify Codex review patch
+        id: verify
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
+          TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-check-codex-pr-safety.rb
+          TRUSTED_POLICY_PREPARER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-prepare-policy-candidate.sh
+        run: |
+          set +e
+          bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh" >"$RUNNER_TEMP/codex-review-verification.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/codex-review-verification.log"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            mkdir -p "$RUNNER_TEMP/codex-review-verification-failure"
+            cp "$RUNNER_TEMP/codex-review-verification.log" "$RUNNER_TEMP/codex-review-verification-failure/verification-failure.log"
+            tail -n 240 "$RUNNER_TEMP/codex-review-verification.log" >"$RUNNER_TEMP/codex-review-verification-failure/verification-failure-summary.log"
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Upload verified Codex review output
+        if: steps.verify.outputs.passed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-review-verified
+          path: |
+            ${{ runner.temp }}/codex-output/codex-review-comment.md
+            ${{ runner.temp }}/codex-output/guardrail-changes.txt
+            ${{ runner.temp }}/codex-output/verification.env
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload review verification failure
+        if: steps.verify.outputs.passed == 'false'
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-review-verification-failure
+          path: ${{ runner.temp }}/codex-review-verification-failure
+          if-no-files-found: error
+          retention-days: 1
+

@@ -1,0 +1,255 @@
+name: Codex review publication
+
+on:
+  workflow_call:
+    inputs:
+      github_app_client_id:
+        required: true
+        type: string
+      sonar_host_url:
+        required: true
+        type: string
+      sonar_project_key:
+        required: true
+        type: string
+      required_status_context:
+        required: true
+        type: string
+      required_status_poll_seconds:
+        required: true
+        type: string
+      required_status_timeout_seconds:
+        required: true
+        type: string
+      is_codex_pr:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      head_ref:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      trusted_sha:
+        required: true
+        type: string
+      verification_passed:
+        required: true
+        type: string
+    outputs:
+      pr_number:
+        value: ${{ jobs.codex-review-publish.outputs.pr_number }}
+      commit_sha:
+        value: ${{ jobs.codex-review-publish.outputs.commit_sha }}
+      output_artifact:
+        value: ${{ jobs.codex-review-publish.outputs.output_artifact }}
+      verified_artifact:
+        value: ${{ jobs.codex-review-publish.outputs.verified_artifact }}
+      passed:
+        value: ${{ jobs.verify-review-status.outputs.passed }}
+      failure_artifact:
+        value: ${{ jobs.verify-review-status.outputs.failure_artifact }}
+    secrets:
+      CODEX_GITHUB_APP_PRIVATE_KEY:
+        required: true
+      CODEX_SONAR_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  codex-review-publish:
+    if: |
+      always() &&
+      inputs.is_codex_pr == 'true' &&
+      inputs.verification_passed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    outputs:
+      pr_number: ${{ steps.publish.outputs.pr_number }}
+      commit_sha: ${{ steps.publish.outputs.commit_sha }}
+      output_artifact: codex-review-output
+      verified_artifact: codex-review-verified
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      EXPECTED_PR_NUMBER: ${{ inputs.pr_number }}
+      EXPECTED_HEAD_REF: ${{ inputs.head_ref }}
+      EXPECTED_HEAD_SHA: ${{ inputs.head_sha }}
+      EXPECTED_BASE_SHA: ${{ inputs.base_sha }}
+      POLICY_CANDIDATE_BASE_SHA: ${{ inputs.head_sha }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+
+      - name: Checkout current default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DEFAULT_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve current default revision
+        id: current-default
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          checkout_sha="$(git rev-parse HEAD)"
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${DEFAULT_BRANCH}" --jq '.object.sha')"
+          if [[ ! "${current_sha}" =~ ^[0-9a-f]{40}$ || "${checkout_sha}" != "${current_sha}" ]]; then
+            echo "::error title=Default branch moved::The current default workflow tree could not be prepared at a stable revision."
+            exit 1
+          fi
+          echo "sha=${current_sha}" >>"$GITHUB_OUTPUT"
+
+      - name: Checkout candidate policy base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: codex-policy-candidate
+
+      - name: Download Codex review output
+        uses: actions/download-artifact@v8
+        with:
+          name: codex-review-output
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Materialize candidate policy tree
+        env:
+          CANDIDATE_ROOT: ${{ github.workspace }}/codex-policy-candidate
+          EXPECTED_CANDIDATE_SHA: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          PATCH_PATH: ${{ runner.temp }}/codex-output/changes.patch
+        run: '"${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh"'
+
+      - name: Enforce pull-request credential isolation
+        run: |
+          ruby --disable-gems "${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb" \
+            --repository-root "$GITHUB_WORKSPACE/codex-policy-candidate" \
+            --trusted-repository-root "$GITHUB_WORKSPACE"
+
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ inputs.github_app_client_id }}
+          private-key: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Verify GitHub App publisher
+        id: publisher
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GITHUB_APP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
+
+      - name: Copy trusted publish script
+        run: |
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-publish.sh "$RUNNER_TEMP/codex-pr-review-publish.sh"
+          chmod +x "$RUNNER_TEMP/codex-pr-review-publish.sh"
+
+      - name: Download verified Codex review output
+        uses: actions/download-artifact@v8
+        with:
+          name: codex-review-verified
+          path: ${{ runner.temp }}/codex-verified
+
+      - name: Publish Codex review feedback
+        id: publish
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BOT_PUBLISHER_LOGIN: ${{ steps.publisher.outputs.publisher_login }}
+          BOT_PUBLISHER_EMAIL: ${{ steps.publisher.outputs.publisher_email }}
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          VERIFICATION_DIR: ${{ runner.temp }}/codex-verified
+          EXPECTED_DEFAULT_SHA: ${{ steps.current-default.outputs.sha }}
+        run: "$RUNNER_TEMP/codex-pr-review-publish.sh"
+
+      - name: Write workflow summary
+        if: always()
+        run: |
+          {
+            echo "## Codex PR Review Feedback"
+            echo
+            echo "- Event: $GITHUB_EVENT_NAME"
+            echo "- Pull request: ${{ steps.publish.outputs.pr_number }}"
+            echo "- Branch: ${{ steps.publish.outputs.branch_name }}"
+            echo "- Commit: ${{ steps.publish.outputs.commit_sha }}"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  verify-review-status:
+    needs: codex-review-publish
+    if: always() && needs.codex-review-publish.outputs.commit_sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
+      failure_artifact: codex-review-external-status-failure
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
+      SONAR_PROJECT_KEY: ${{ inputs.sonar_project_key }}
+      PR_NUMBER: ${{ needs.codex-review-publish.outputs.pr_number }}
+      PUBLISHED_COMMIT_SHA: ${{ needs.codex-review-publish.outputs.commit_sha }}
+      REQUIRED_STATUS_CONTEXT: ${{ inputs.required_status_context }}
+      REQUIRED_STATUS_TIMEOUT_SECONDS: ${{ inputs.required_status_timeout_seconds }}
+      REQUIRED_STATUS_POLL_SECONDS: ${{ inputs.required_status_poll_seconds }}
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+
+      - name: Checkout trusted status scripts
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.trusted_sha }}
+          persist-credentials: false
+
+      - name: Check external PR status and Sonar quality gate
+        id: verify
+        run: |
+          set +e
+          {
+            ${CODEX_RUNTIME_PATH}/.github/scripts/codex-wait-pr-status.sh &&
+              ${CODEX_RUNTIME_PATH}/.github/scripts/codex-check-sonar-quality-gate.sh
+          } >"$RUNNER_TEMP/codex-review-external-status.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/codex-review-external-status.log"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            mkdir -p "$RUNNER_TEMP/codex-review-external-status-failure"
+            cp "$RUNNER_TEMP/codex-review-external-status.log" "$RUNNER_TEMP/codex-review-external-status-failure/verification-failure.log"
+            tail -n 240 "$RUNNER_TEMP/codex-review-external-status.log" >"$RUNNER_TEMP/codex-review-external-status-failure/verification-failure-summary.log"
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Upload external status failure
+        if: steps.verify.outputs.passed != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-review-external-status-failure
+          path: ${{ runner.temp }}/codex-review-external-status-failure
+          if-no-files-found: error
+          retention-days: 1
+

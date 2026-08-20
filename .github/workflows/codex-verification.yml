@@ -1,0 +1,162 @@
+name: Codex verification and repair
+
+on:
+  workflow_call:
+    inputs:
+      issueKey:
+        required: true
+        type: string
+      summary:
+        required: true
+        type: string
+      description:
+        required: true
+        type: string
+      status:
+        required: true
+        type: string
+      assignee:
+        required: true
+        type: string
+      issueUrl:
+        required: true
+        type: string
+      initiatorDisplayName:
+        required: false
+        default: ''
+        type: string
+      runner_label:
+        required: true
+        type: string
+      node_version:
+        required: false
+        default: "22"
+        type: string
+      branch_name:
+        required: true
+        type: string
+      has_changes:
+        required: true
+        type: string
+      trusted_sha:
+        required: true
+        type: string
+      source_artifact:
+        required: true
+        type: string
+      plan_payload:
+        required: true
+        type: string
+      plan_sha256:
+        required: true
+        type: string
+    outputs:
+      passed:
+        value: ${{ jobs.repair-3.outputs.passed == 'true' || jobs.repair-2.outputs.passed == 'true' || jobs.repair-1.outputs.passed == 'true' || jobs.initial.outputs.passed == 'true' }}
+      output_artifact:
+        value: ${{ jobs.repair-3.outputs.passed == 'true' && jobs.repair-3.outputs.output_artifact || jobs.repair-2.outputs.passed == 'true' && jobs.repair-2.outputs.output_artifact || jobs.repair-1.outputs.passed == 'true' && jobs.repair-1.outputs.output_artifact || jobs.initial.outputs.output_artifact }}
+      verified_artifact:
+        value: ${{ jobs.repair-3.outputs.passed == 'true' && jobs.repair-3.outputs.verified_artifact || jobs.repair-2.outputs.passed == 'true' && jobs.repair-2.outputs.verified_artifact || jobs.repair-1.outputs.passed == 'true' && jobs.repair-1.outputs.verified_artifact || jobs.initial.outputs.verified_artifact }}
+      latest_output_artifact:
+        value: ${{ jobs.repair-3.outputs.has_changes == 'true' && jobs.repair-3.outputs.output_artifact || jobs.repair-2.outputs.has_changes == 'true' && jobs.repair-2.outputs.output_artifact || jobs.repair-1.outputs.has_changes == 'true' && jobs.repair-1.outputs.output_artifact || jobs.initial.outputs.output_artifact }}
+      latest_draft_artifact:
+        value: ${{ jobs.repair-3.outputs.has_changes == 'true' && jobs.repair-3.outputs.draft_artifact || jobs.repair-2.outputs.has_changes == 'true' && jobs.repair-2.outputs.draft_artifact || jobs.repair-1.outputs.has_changes == 'true' && jobs.repair-1.outputs.draft_artifact || jobs.initial.outputs.draft_artifact }}
+      latest_failure_artifact:
+        value: ${{ jobs.repair-3.outputs.has_changes == 'true' && jobs.repair-3.outputs.failure_artifact || jobs.repair-2.outputs.has_changes == 'true' && jobs.repair-2.outputs.failure_artifact || jobs.repair-1.outputs.has_changes == 'true' && jobs.repair-1.outputs.failure_artifact || jobs.initial.outputs.failure_artifact }}
+    secrets:
+      CODEX_OPENAI_API_KEY:
+        required: true
+
+jobs:
+  initial:
+    permissions: {}
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-verify-initial.yml@0000000000000000000000000000000000000000
+    with:
+      node_version: ${{ inputs.node_version }}
+      has_changes: ${{ inputs.has_changes }}
+      branch_name: ${{ inputs.branch_name }}
+      source_artifact: ${{ inputs.source_artifact }}
+
+  repair-1:
+    needs: initial
+    if: inputs.has_changes == 'true' && needs.initial.outputs.passed != 'true'
+    permissions:
+      contents: read
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-repair-round.yml@0000000000000000000000000000000000000000
+    with:
+      issueKey: ${{ inputs.issueKey }}
+      summary: ${{ inputs.summary }}
+      description: ${{ inputs.description }}
+      status: ${{ inputs.status }}
+      assignee: ${{ inputs.assignee }}
+      issueUrl: ${{ inputs.issueUrl }}
+      initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
+      runner_label: ${{ inputs.runner_label }}
+      node_version: ${{ inputs.node_version }}
+      attempt: "1"
+      max_attempts: "3"
+      branch_name: ${{ inputs.branch_name }}
+      trusted_sha: ${{ inputs.trusted_sha }}
+      source_artifact: ${{ inputs.source_artifact }}
+      input_artifact: ${{ needs.initial.outputs.output_artifact }}
+      failure_artifact: ${{ needs.initial.outputs.failure_artifact }}
+      plan_payload: ${{ inputs.plan_payload }}
+      plan_sha256: ${{ inputs.plan_sha256 }}
+    secrets:
+      CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
+
+  repair-2:
+    needs: repair-1
+    if: needs.repair-1.outputs.has_changes == 'true' && needs.repair-1.outputs.passed != 'true'
+    permissions:
+      contents: read
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-repair-round.yml@0000000000000000000000000000000000000000
+    with:
+      issueKey: ${{ inputs.issueKey }}
+      summary: ${{ inputs.summary }}
+      description: ${{ inputs.description }}
+      status: ${{ inputs.status }}
+      assignee: ${{ inputs.assignee }}
+      issueUrl: ${{ inputs.issueUrl }}
+      initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
+      runner_label: ${{ inputs.runner_label }}
+      node_version: ${{ inputs.node_version }}
+      attempt: "2"
+      max_attempts: "3"
+      branch_name: ${{ inputs.branch_name }}
+      trusted_sha: ${{ inputs.trusted_sha }}
+      source_artifact: ${{ inputs.source_artifact }}
+      input_artifact: ${{ needs.repair-1.outputs.output_artifact }}
+      failure_artifact: ${{ needs.repair-1.outputs.failure_artifact }}
+      plan_payload: ${{ inputs.plan_payload }}
+      plan_sha256: ${{ inputs.plan_sha256 }}
+    secrets:
+      CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
+
+  repair-3:
+    needs: repair-2
+    if: needs.repair-2.outputs.has_changes == 'true' && needs.repair-2.outputs.passed != 'true'
+    permissions:
+      contents: read
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-repair-round.yml@0000000000000000000000000000000000000000
+    with:
+      issueKey: ${{ inputs.issueKey }}
+      summary: ${{ inputs.summary }}
+      description: ${{ inputs.description }}
+      status: ${{ inputs.status }}
+      assignee: ${{ inputs.assignee }}
+      issueUrl: ${{ inputs.issueUrl }}
+      initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
+      runner_label: ${{ inputs.runner_label }}
+      node_version: ${{ inputs.node_version }}
+      attempt: "3"
+      max_attempts: "3"
+      branch_name: ${{ inputs.branch_name }}
+      trusted_sha: ${{ inputs.trusted_sha }}
+      source_artifact: ${{ inputs.source_artifact }}
+      input_artifact: ${{ needs.repair-2.outputs.output_artifact }}
+      failure_artifact: ${{ needs.repair-2.outputs.failure_artifact }}
+      plan_payload: ${{ inputs.plan_payload }}
+      plan_sha256: ${{ inputs.plan_sha256 }}
+    secrets:
+      CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
