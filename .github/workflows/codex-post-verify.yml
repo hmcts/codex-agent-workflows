@@ -70,7 +70,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
 
       - name: Record selected Codex artifacts
         id: selected-artifacts
@@ -159,7 +159,7 @@ jobs:
       STATUS_FAILURE_ARTIFACT: codex-jira-pr-status-failure-0
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
 
       - name: Checkout trusted status scripts
         uses: actions/checkout@v7

@@ -56,6 +56,9 @@ jobs:
       - name: Lint GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck= .github/workflows/*.yml
 
+      - name: Check generated workflow documentation
+        run: python3 .github/scripts/generate-workflow-docs.py --check
+
       - name: Check changed-file whitespace
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}

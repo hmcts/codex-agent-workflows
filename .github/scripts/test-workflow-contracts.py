@@ -9,20 +9,62 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).parents[1]
-IMPLEMENT_WORKFLOW = ROOT / "workflows" / "codex-implement.yml"
-REVIEW_WORKFLOW = ROOT / "workflows" / "codex-review-feedback.yml"
+WORKFLOW_ROOT = ROOT / "workflows"
+IMPLEMENT_WORKFLOW = WORKFLOW_ROOT / "codex-implement.yml"
+PLAN_WORKFLOW = WORKFLOW_ROOT / "codex-plan.yml"
+GENERATE_WORKFLOW = WORKFLOW_ROOT / "codex-generate.yml"
+VERIFY_INITIAL_WORKFLOW = WORKFLOW_ROOT / "codex-verify-initial.yml"
+REPAIR_ROUND_WORKFLOW = WORKFLOW_ROOT / "codex-repair-round.yml"
+PUBLISH_WORKFLOW = WORKFLOW_ROOT / "codex-publish.yml"
+POST_REPAIR_WORKFLOW = WORKFLOW_ROOT / "codex-post-repair.yml"
+REVIEW_WORKFLOW = WORKFLOW_ROOT / "codex-review-feedback.yml"
+REVIEW_INTAKE_WORKFLOW = WORKFLOW_ROOT / "codex-review-intake.yml"
+REVIEW_GENERATE_WORKFLOW = WORKFLOW_ROOT / "codex-review-generate.yml"
+REVIEW_PUBLISH_WORKFLOW = WORKFLOW_ROOT / "codex-review-publish.yml"
+REVIEW_REPAIR_WORKFLOW = WORKFLOW_ROOT / "codex-review-repair.yml"
+REVIEW_TERMINAL_WORKFLOW = WORKFLOW_ROOT / "codex-review-terminal.yml"
 UPDATER_WORKFLOW = ROOT / "workflows" / "update-callers.yml"
 PREFLIGHT = ROOT / "scripts" / "codex-runner-preflight.sh"
 ROLLOUT = ROOT.parent / "docs" / "juror-rollout.md"
+COMPONENT_WORKFLOWS = tuple(WORKFLOW_ROOT.glob("codex-*.yml"))
+
+
+def workflow_job(workflow: Path, job_name: str) -> str:
+    content = workflow.read_text(encoding="utf-8")
+    start = content.index(f"  {job_name}:")
+    next_job = re.search(r"(?m)^  [A-Za-z0-9_-]+:\s*$", content[start + 3 :])
+    end = start + 3 + next_job.start() if next_job else len(content)
+    return content[start:end]
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_internal_reusable_workflow_pins_package_the_referenced_component(self):
+        pattern = re.compile(
+            r"uses: hmcts/codex-agent-workflows/(\.github/workflows/[^@\s]+)@([0-9a-f]{40})"
+        )
+        references = []
+        for workflow in COMPONENT_WORKFLOWS:
+            references.extend(pattern.findall(workflow.read_text(encoding="utf-8")))
+        self.assertTrue(references)
+        for path, pin in references:
+            completed = subprocess.run(
+                ["git", "cat-file", "-e", f"{pin}:{path}"],
+                cwd=ROOT.parent,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                completed.returncode,
+                0,
+                f"immutable workflow {pin} does not package {path}: {completed.stderr}",
+            )
+
     def test_immutable_runtime_pin_packages_policy_preparer(self):
         pins = set()
         pattern = re.compile(
             r"hmcts/codex-agent-workflows/\.github/actions/runtime@([0-9a-f]{40})"
         )
-        for workflow in (IMPLEMENT_WORKFLOW, REVIEW_WORKFLOW):
+        for workflow in COMPONENT_WORKFLOWS:
             pins.update(pattern.findall(workflow.read_text(encoding="utf-8")))
 
         self.assertEqual(len(pins), 1)
@@ -70,16 +112,13 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn("required: true", content)
 
     def test_validated_plan_bundle_is_retained(self):
-        content = IMPLEMENT_WORKFLOW.read_text(encoding="utf-8")
+        content = PLAN_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("name: codex-validated-plan", content)
         self.assertIn("path: ${{ runner.temp }}/codex-plan", content)
         self.assertIn("retention-days: 30", content)
 
     def test_planning_failure_always_attempts_jira_callback(self):
-        content = IMPLEMENT_WORKFLOW.read_text(encoding="utf-8")
-        start = content.index("  codex-plan-failed:")
-        end = content.index("\n  codex-plan-blocked:", start)
-        job = content[start:end]
+        job = workflow_job(PLAN_WORKFLOW, "codex-plan-failed")
         self.assertIn("always()", job)
         self.assertIn("needs.codex-plan-action.result != 'success'", job)
         self.assertIn("needs.validate-codex-plan.result != 'success'", job)
@@ -87,13 +126,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("--status failed", job)
 
     def test_implementation_generation_failure_always_attempts_jira_callback(self):
-        content = IMPLEMENT_WORKFLOW.read_text(encoding="utf-8")
-        start = content.index("  codex-generation-terminal-failed:")
-        end = content.index("\n  codex-no-changes:", start)
-        job = content[start:end]
+        job = workflow_job(GENERATE_WORKFLOW, "codex-generation-terminal-failed")
         self.assertIn("always()", job)
         self.assertIn(
-            "needs: [validate-codex-plan, codex-generate-action, codex-generate]", job
+            "needs: [codex-generate-action, codex-generate]", job
         )
         self.assertIn("needs.codex-generate.outputs.has_changes != 'true'", job)
         self.assertIn("needs.codex-generate.outputs.has_changes != 'false'", job)
@@ -102,6 +138,7 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_release_updater_uses_contract_migrator(self):
         content = UPDATER_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("- '.github/workflows/codex-*.yml'", content)
         self.assertIn(".github/scripts/update-caller-workflow.py", content)
         self.assertNotIn("sed -E", content)
 
@@ -182,7 +219,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(repository_commands, [])
 
     def test_codex_action_is_final_in_every_model_facing_job(self):
-        for workflow in (IMPLEMENT_WORKFLOW, REVIEW_WORKFLOW):
+        for workflow in COMPONENT_WORKFLOWS:
             content = workflow.read_text(encoding="utf-8")
             job_starts = [
                 index
@@ -215,35 +252,27 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_all_publication_jobs_gate_pr_oidc_before_token_minting(self):
         expected_jobs = {
-            IMPLEMENT_WORKFLOW: {
-                "publish-draft-pr": (
-                    "${{ needs.prepare-codex-verification-source.outputs.source_sha }}"
-                ),
-                "publish-pr": (
-                    "${{ needs.prepare-codex-verification-source.outputs.source_sha }}"
-                ),
+            PUBLISH_WORKFLOW: {
+                "publish-draft-pr": "${{ inputs.source_sha }}",
+                "publish-pr": "${{ inputs.source_sha }}",
+            },
+            POST_REPAIR_WORKFLOW: {
                 "publish-published-pr-repair-1": (
-                    "${{ needs.publish-pr.outputs.commit_sha }}"
+                    "${{ inputs.commit_sha }}"
                 ),
             },
-            REVIEW_WORKFLOW: {
-                "codex-review-publish": (
-                    "${{ needs.codex-review-generate-action.outputs.head_sha }}"
-                ),
+            REVIEW_PUBLISH_WORKFLOW: {
+                "codex-review-publish": "${{ inputs.head_sha }}",
+            },
+            REVIEW_REPAIR_WORKFLOW: {
                 "codex-review-external-republish": (
                     "${{ needs.prepare-published-review-repair-source.outputs.head_sha }}"
                 ),
             },
         }
         for workflow, jobs in expected_jobs.items():
-            content = workflow.read_text(encoding="utf-8")
             for job_name, candidate_base in jobs.items():
-                start = content.index(f"  {job_name}:")
-                next_job = re.search(
-                    r"(?m)^  [A-Za-z0-9_-]+:\s*$", content[start + 3 :]
-                )
-                end = start + 3 + next_job.start() if next_job else len(content)
-                job = content[start:end]
+                job = workflow_job(workflow, job_name)
                 checkout = job.index("Checkout candidate policy base")
                 download = job.index("path: ${{ runner.temp }}/codex-output")
                 materialize = job.index("codex-prepare-policy-candidate.sh")
@@ -272,17 +301,11 @@ class WorkflowContractTests(unittest.TestCase):
                 )
 
     def test_review_publication_revalidates_fresh_default_before_push(self):
-        content = REVIEW_WORKFLOW.read_text(encoding="utf-8")
-        for job_name in (
-            "codex-review-publish",
-            "codex-review-external-republish",
+        for workflow, job_name in (
+            (REVIEW_PUBLISH_WORKFLOW, "codex-review-publish"),
+            (REVIEW_REPAIR_WORKFLOW, "codex-review-external-republish"),
         ):
-            start = content.index(f"  {job_name}:")
-            next_job = re.search(
-                r"(?m)^  [A-Za-z0-9_-]+:\s*$", content[start + 3 :]
-            )
-            end = start + 3 + next_job.start() if next_job else len(content)
-            job = content[start:end]
+            job = workflow_job(workflow, job_name)
             fresh_checkout = job.index("Checkout current default branch")
             current_revision = job.index("Resolve current default revision")
             policy_gate = job.index("check-codex-pr-safety.rb")
@@ -340,10 +363,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("Default branch moved", publisher)
 
     def test_review_reusable_workflow_accepts_only_safe_issue_comments(self):
-        content = REVIEW_WORKFLOW.read_text(encoding="utf-8")
-        start = content.index("  detect-codex-pr:")
-        end = content.index("\n  codex-review-generate-action:", start)
-        job = content[start:end]
+        job = workflow_job(REVIEW_INTAKE_WORKFLOW, "detect-codex-pr")
         self.assertIn('case "$GITHUB_EVENT_NAME" in', job)
         self.assertIn("            issue_comment)", job)
         self.assertNotIn("pull_request_review", job)
@@ -385,7 +405,10 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn("Missing trusted policy candidate preparer", content)
 
     def test_review_verification_bundle_includes_structural_safety_checker(self):
-        content = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+        content = "\n".join(
+            workflow.read_text(encoding="utf-8")
+            for workflow in (REVIEW_GENERATE_WORKFLOW, REVIEW_REPAIR_WORKFLOW)
+        )
         self.assertEqual(content.count("trusted-check-codex-pr-safety.rb"), 6)
         self.assertEqual(
             content.count("trusted-codex-prepare-policy-candidate.sh"), 6
@@ -394,19 +417,14 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("trusted-check-codex-pr-safety.py", content)
 
     def test_jira_no_change_result_has_terminal_callback(self):
-        content = IMPLEMENT_WORKFLOW.read_text(encoding="utf-8")
-        start = content.index("  codex-no-changes:")
-        end = content.index("\n  verify-codex-output:", start)
-        job = content[start:end]
+        job = workflow_job(GENERATE_WORKFLOW, "codex-no-changes")
         self.assertIn("always()", job)
         self.assertIn("has_changes == 'false'", job)
         self.assertIn("--status no-changes", job)
 
     def test_verification_failures_have_structure_only_draft_recovery(self):
-        content = IMPLEMENT_WORKFLOW.read_text(encoding="utf-8")
-        start = content.index("  prepare-draft-publication:")
-        end = content.index("\n  publish-draft-pr:", start)
-        job = content[start:end]
+        content = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
+        job = workflow_job(PUBLISH_WORKFLOW, "prepare-draft-publication")
         self.assertIn("always()", job)
         self.assertIn('SKIP_LOCAL_PIPELINE: "true"', job)
         self.assertIn("permissions: {}", job)
@@ -415,27 +433,26 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("  codex-prepublication-terminal-failed:", content)
 
     def test_review_setup_failure_returns_existing_pr_to_draft(self):
-        content = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+        content = REVIEW_GENERATE_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
             "passed: ${{ steps.verify.outputs.passed || 'false' }}", content
         )
-        start = content.index("  codex-review-prepublication-verification-failed:")
-        job = content[start:]
+        job = workflow_job(
+            REVIEW_TERMINAL_WORKFLOW,
+            "codex-review-prepublication-verification-failed",
+        )
         self.assertIn("always()", job)
         self.assertIn("codex-mark-pr-failed.sh", job)
         self.assertIn('NOTIFY_JIRA: "true"', job)
 
     def test_partial_jira_publication_recovers_remote_pr_state(self):
-        content = IMPLEMENT_WORKFLOW.read_text(encoding="utf-8")
         jobs = {
-            "publish-draft-pr": "publish-pr",
-            "publish-pr": "verify-published-pr-patch",
-            "publish-published-pr-repair-1": "verify-published-pr-1-patch",
+            (PUBLISH_WORKFLOW, "publish-draft-pr"): True,
+            (PUBLISH_WORKFLOW, "publish-pr"): False,
+            (POST_REPAIR_WORKFLOW, "publish-published-pr-repair-1"): False,
         }
-        for job_name, next_job_name in jobs.items():
-            start = content.index(f"  {job_name}:")
-            end = content.index(f"\n  {next_job_name}:", start)
-            job = content[start:end]
+        for (workflow, job_name), draft in jobs.items():
+            job = workflow_job(workflow, job_name)
             self.assertIn(
                 "steps.state.outputs.pr_number || steps.publish.outputs.pr_number", job
             )
@@ -447,17 +464,7 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn('--head-ref "$BRANCH_NAME"', job)
             self.assertIn('--head-sha "$COMMIT_SHA"', job)
             self.assertIn("--append-output", job)
-
-        draft_start = content.index("  publish-draft-pr:")
-        draft_end = content.index("\n  publish-pr:", draft_start)
-        self.assertIn("--draft true", content[draft_start:draft_end])
-        for job_name, next_job_name in (
-            ("publish-pr", "verify-published-pr-patch"),
-            ("publish-published-pr-repair-1", "verify-published-pr-1-patch"),
-        ):
-            start = content.index(f"  {job_name}:")
-            end = content.index(f"\n  {next_job_name}:", start)
-            self.assertIn("--draft false", content[start:end])
+            self.assertIn(f"--draft {str(draft).lower()}", job)
 
     def test_release_updater_validates_before_branch_mutation_and_resets_stale_branch(self):
         content = UPDATER_WORKFLOW.read_text(encoding="utf-8")

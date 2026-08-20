@@ -70,7 +70,7 @@ on:
 jobs:
   initial:
     permissions: {}
-    uses: hmcts/codex-agent-workflows/.github/workflows/codex-verify-initial.yml@0000000000000000000000000000000000000000
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-verify-initial.yml@0a744ceb249988e5153f4a5f078ff2584b6a7f23
     with:
       node_version: ${{ inputs.node_version }}
       has_changes: ${{ inputs.has_changes }}
@@ -82,7 +82,7 @@ jobs:
     if: inputs.has_changes == 'true' && needs.initial.outputs.passed != 'true'
     permissions:
       contents: read
-    uses: hmcts/codex-agent-workflows/.github/workflows/codex-repair-round.yml@0000000000000000000000000000000000000000
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-repair-round.yml@0a744ceb249988e5153f4a5f078ff2584b6a7f23
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
@@ -110,7 +110,7 @@ jobs:
     if: needs.repair-1.outputs.has_changes == 'true' && needs.repair-1.outputs.passed != 'true'
     permissions:
       contents: read
-    uses: hmcts/codex-agent-workflows/.github/workflows/codex-repair-round.yml@0000000000000000000000000000000000000000
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-repair-round.yml@0a744ceb249988e5153f4a5f078ff2584b6a7f23
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
@@ -138,7 +138,7 @@ jobs:
     if: needs.repair-2.outputs.has_changes == 'true' && needs.repair-2.outputs.passed != 'true'
     permissions:
       contents: read
-    uses: hmcts/codex-agent-workflows/.github/workflows/codex-repair-round.yml@0000000000000000000000000000000000000000
+    uses: hmcts/codex-agent-workflows/.github/workflows/codex-repair-round.yml@0a744ceb249988e5153f4a5f078ff2584b6a7f23
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}

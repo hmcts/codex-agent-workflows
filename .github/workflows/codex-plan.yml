@@ -75,7 +75,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -129,7 +129,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
 
       - name: Checkout trusted plan validator
         uses: actions/checkout@v7
@@ -197,7 +197,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
 
       - name: Notify Jira that planning failed
         continue-on-error: true
@@ -240,7 +240,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@b6633b4877ff385ff0adc0c3d1b2de029fdccaa1
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
 
       - name: Notify Jira that implementation is blocked
         continue-on-error: true

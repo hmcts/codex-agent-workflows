@@ -9,8 +9,7 @@ on:
       - .github/actions/runtime/**
       - .github/schemas/**
       - .github/scripts/**
-      - .github/workflows/codex-implement.yml
-      - .github/workflows/codex-review-feedback.yml
+      - '.github/workflows/codex-*.yml'
   workflow_dispatch:
     inputs:
       release_sha:
