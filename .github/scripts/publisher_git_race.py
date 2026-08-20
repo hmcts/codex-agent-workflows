@@ -137,4 +137,3 @@ class PublisherGitRaceMixin:
             )
             self.assertNotEqual(completed.returncode, 0)
             self.assertEqual(self.remote_branch_sha(remote, branch), moved_sha)
-

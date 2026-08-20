@@ -129,4 +129,3 @@ class WorkflowSafetyTestCase(unittest.TestCase):
         self.assertIn("Unsafe generated-code credential exposure", completed.stderr)
         self.assertIn(diagnostic, completed.stderr)
         self.assertIn(f".github/workflows/{filename}", completed.stderr)
-

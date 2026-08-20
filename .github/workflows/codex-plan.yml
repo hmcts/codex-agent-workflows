@@ -264,4 +264,3 @@ jobs:
           } >>"${GITHUB_STEP_SUMMARY}"
           echo "::error title=Codex plan blocked::The validated plan is not ready to implement; no implementation or pull request was created."
           exit 1
-

@@ -186,4 +186,3 @@ esac
         ]
         if not matching_lines:
             raise AssertionError(f"Git command was not logged: {command}")
-

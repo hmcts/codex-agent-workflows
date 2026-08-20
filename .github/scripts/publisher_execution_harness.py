@@ -221,4 +221,3 @@ class PublisherExecutionHarnessMixin:
             pr_exists=pr_exists,
         )
         return completed, commands
-
