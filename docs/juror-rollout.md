@@ -18,8 +18,9 @@ Configure each Juror repository with:
 - Actions secret `CODEX_OPENAI_API_KEY`
 - Actions secret `CODEX_GITHUB_APP_PRIVATE_KEY`
 - Actions secret `CODEX_JIRA_PR_NOTIFY_URL`
-- Actions secret `CODEX_SONAR_TOKEN`
 - Actions variable `CODEX_GITHUB_APP_CLIENT_ID`
+
+`CODEX_SONAR_TOKEN` may be added later to enable direct Sonar API quality-gate diagnostics. Until then, the workflow relies on the repositories' required Jenkins, Sonar and GitHub status checks.
 
 Configure `hmcts/codex-agent-workflows` with the same App client ID and private key for release pin-update PRs. Keep private reusable-workflow access limited to the HMCTS organisation. Require CODEOWNERS review and prevent force pushes or branch deletion on `main`.
 

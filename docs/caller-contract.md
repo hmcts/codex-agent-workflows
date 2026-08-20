@@ -11,7 +11,8 @@ The initiating display name is used only by trusted collection jobs to add trace
 - `CODEX_OPENAI_API_KEY`
 - `CODEX_GITHUB_APP_PRIVATE_KEY`
 - `CODEX_JIRA_PR_NOTIFY_URL`
-- `CODEX_SONAR_TOKEN`
+
+`CODEX_SONAR_TOKEN` is optional. When configured, it enables the revision-specific Sonar API quality-gate check. When absent, the workflow records that the API check was skipped and continues to treat the repository's required Jenkins, Sonar and GitHub status checks as authoritative.
 
 Each trusted publisher job mints a short-lived GitHub App installation token restricted to the caller repository. The App bot identity is verified and derived at runtime; no publisher PAT or stored login is required. Secrets are unavailable to generated code and credential-free verification jobs.
 

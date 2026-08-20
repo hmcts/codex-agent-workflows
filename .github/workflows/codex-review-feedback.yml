@@ -50,7 +50,7 @@ on:
       CODEX_GITHUB_APP_PRIVATE_KEY:
         required: true
       CODEX_SONAR_TOKEN:
-        required: true
+        required: false
       CODEX_JIRA_PR_NOTIFY_URL:
         required: true
 

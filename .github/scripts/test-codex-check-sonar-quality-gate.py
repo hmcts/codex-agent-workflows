@@ -16,6 +16,22 @@ STALE_SHA = "b" * 40
 
 
 class SonarQualityGateTest(unittest.TestCase):
+    def test_skips_when_sonar_credentials_are_not_configured(self) -> None:
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"SONAR_TOKEN", "SONAR_PROJECT_KEY"}
+        }
+        completed = subprocess.run(
+            ["bash", str(SCRIPT)],
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Sonar API quality-gate verification skipped", completed.stdout)
+
     def run_case(
         self,
         *,

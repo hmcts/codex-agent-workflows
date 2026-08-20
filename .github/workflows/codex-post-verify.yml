@@ -49,7 +49,7 @@ on:
         value: ${{ jobs.verify-published-pr.outputs.failure_artifact }}
     secrets:
       CODEX_SONAR_TOKEN:
-        required: true
+        required: false
 
 jobs:
   verify-published-pr-patch:

@@ -42,7 +42,7 @@ jobs:
     secrets:
       CODEX_OPENAI_API_KEY: ${{{{ secrets.CODEX_OPENAI_API_KEY }}}}
       CODEX_GITHUB_APP_PRIVATE_KEY: ${{{{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}}}
-{notify}      CODEX_SONAR_TOKEN: ${{{{ secrets.CODEX_SONAR_TOKEN }}}}
+{notify}
 """
 
 
@@ -64,7 +64,6 @@ jobs:
       CODEX_OPENAI_API_KEY: ${{{{ secrets.CODEX_OPENAI_API_KEY }}}}
       CODEX_GITHUB_APP_PRIVATE_KEY: ${{{{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}}}
       CODEX_JIRA_PR_NOTIFY_URL: ${{{{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}}}
-      CODEX_SONAR_TOKEN: ${{{{ secrets.CODEX_SONAR_TOKEN }}}}
 """
 
 
@@ -138,8 +137,8 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
                     f"      {name}: ${{{{ secrets.{name} }}}}\n" for name in extras
                 )
                 caller = dispatch_caller().replace(
-                    "      CODEX_SONAR_TOKEN:",
-                    extra_lines + "      CODEX_SONAR_TOKEN:",
+                    "      CODEX_JIRA_PR_NOTIFY_URL:",
+                    extra_lines + "      CODEX_JIRA_PR_NOTIFY_URL:",
                 )
                 with self.assertRaisesRegex(
                     MODULE.CallerContractError,
@@ -188,12 +187,12 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
 
     def test_rejects_wrong_required_secret_mapping(self):
         caller = dispatch_caller().replace(
-            "${{ secrets.CODEX_SONAR_TOKEN }}", "${{ secrets.OTHER_TOKEN }}"
+            "${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}", "${{ secrets.OTHER_TOKEN }}"
         )
 
         with self.assertRaisesRegex(
             MODULE.CallerContractError,
-            r"CODEX_SONAR_TOKEN must map exactly to \$\{\{ secrets.CODEX_SONAR_TOKEN \}\}",
+            r"CODEX_JIRA_PR_NOTIFY_URL must map exactly to \$\{\{ secrets.CODEX_JIRA_PR_NOTIFY_URL \}\}",
         ):
             MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
 

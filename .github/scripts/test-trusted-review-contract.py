@@ -139,8 +139,10 @@ jobs:
             "must not execute steps": trusted_review_wrapper().replace(
                 "    with:\n", "    steps: []\n    with:\n", 1
             ),
-            "four trusted review secrets": trusted_review_wrapper().replace(
-                "      CODEX_SONAR_TOKEN:", "      EXTRA_SECRET: literal\n      CODEX_SONAR_TOKEN:", 1
+            "three trusted review secrets": trusted_review_wrapper().replace(
+                "      CODEX_JIRA_PR_NOTIFY_URL:",
+                "      EXTRA_SECRET: literal\n      CODEX_JIRA_PR_NOTIFY_URL:",
+                1,
             ),
             "effective write permission": trusted_review_wrapper().replace(
                 "      issues: read\n    uses:", "      issues: write\n    uses:", 1

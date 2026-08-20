@@ -48,7 +48,6 @@ REQUIRED_SECRETS = (
     "CODEX_OPENAI_API_KEY",
     "CODEX_GITHUB_APP_PRIVATE_KEY",
     "CODEX_JIRA_PR_NOTIFY_URL",
-    "CODEX_SONAR_TOKEN",
 )
 REVIEW_JOB_IF = (
     "${{ github.event.issue.pull_request && "

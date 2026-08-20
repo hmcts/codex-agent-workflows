@@ -91,7 +91,7 @@ def trusted_review_contract!(analysis)
 
   secrets = job["secrets"]
   unless secrets.is_a?(Hash) && secrets.keys.sort == TRUSTED_REVIEW_SECRETS.sort
-    raise WorkflowSafetyError, "#{location}.secrets must map exactly the four trusted review secrets"
+    raise WorkflowSafetyError, "#{location}.secrets must map exactly the three trusted review secrets"
   end
   TRUSTED_REVIEW_SECRETS.each do |name|
     expected = "${{ secrets.#{name} }}"

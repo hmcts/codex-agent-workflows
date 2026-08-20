@@ -59,7 +59,6 @@ TRUSTED_REVIEW_SECRETS = %w[
   CODEX_OPENAI_API_KEY
   CODEX_GITHUB_APP_PRIVATE_KEY
   CODEX_JIRA_PR_NOTIFY_URL
-  CODEX_SONAR_TOKEN
 ].freeze
 TRUSTED_REVIEW_PREFIX = "hmcts/codex-agent-workflows/.github/workflows/codex-review-feedback.yml@"
 TRUSTED_REVIEW_REFERENCE = %r{\Ahmcts/codex-agent-workflows/\.github/workflows/codex-review-feedback\.yml@[0-9a-f]{40}\z}.freeze
