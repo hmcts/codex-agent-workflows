@@ -17,6 +17,8 @@ The coordinated Juror configuration and activation sequence is documented in [`d
 
 The generated workflow inventory and Mermaid diagrams are available in [`docs/workflow-architecture.md`](docs/workflow-architecture.md). Regenerate that file with `.github/scripts/generate-workflow-docs.py` after changing a shared workflow.
 
+The principal runtime scripts, their trust boundaries and their hand-off contracts are documented in [`docs/script-reference.md`](docs/script-reference.md).
+
 ## Release policy
 
 Changes to reusable workflows require CODEOWNERS review. A push to `main` runs `Update caller workflow pins`, which uses the restricted bot identity to raise full-SHA update PRs in every onboarded Juror repository. The workflow skips repositories that have not yet merged their caller wrappers.
