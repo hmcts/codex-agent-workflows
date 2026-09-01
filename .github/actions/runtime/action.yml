@@ -1,0 +1,19 @@
+name: Locate trusted Codex runtime
+description: Exposes the scripts and schemas pinned with the shared workflow release.
+
+outputs:
+  path:
+    description: Absolute path to the immutable shared workflow checkout.
+    value: ${{ steps.locate.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Locate runtime
+      id: locate
+      shell: bash
+      run: |
+        set -euo pipefail
+        runtime_path="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd -P)"
+        echo "path=${runtime_path}" >>"$GITHUB_OUTPUT"
+        echo "CODEX_RUNTIME_PATH=${runtime_path}" >>"$GITHUB_ENV"

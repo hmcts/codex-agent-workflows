@@ -1,0 +1,135 @@
+name: Codex initial verification
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        required: false
+        default: "22"
+        type: string
+      has_changes:
+        required: true
+        type: string
+      branch_name:
+        required: true
+        type: string
+      source_artifact:
+        required: true
+        type: string
+    outputs:
+      passed:
+        value: ${{ jobs.verify-codex-output.outputs.passed }}
+      output_artifact:
+        value: ${{ jobs.verify-codex-output.outputs.output_artifact }}
+      verified_artifact:
+        value: ${{ jobs.verify-codex-output.outputs.verified_artifact }}
+      draft_artifact:
+        value: ${{ jobs.verify-codex-output.outputs.draft_artifact }}
+      failure_artifact:
+        value: ${{ jobs.verify-codex-output.outputs.failure_artifact }}
+
+jobs:
+  verify-codex-output:
+    if: inputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions: {}
+    outputs:
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
+      output_artifact: codex-jira-output
+      verified_artifact: codex-jira-verified-0
+      draft_artifact: codex-jira-unverified-0
+      failure_artifact: codex-jira-verification-failure-0
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      EXPECTED_BRANCH_NAME: ${{ inputs.branch_name }}
+      LOCAL_PIPELINE_MODE: fast
+      CODEX_OUTPUT_ARTIFACT: codex-jira-output
+      CODEX_VERIFIED_ARTIFACT: codex-jira-verified-0
+      CODEX_DRAFT_ARTIFACT: codex-jira-unverified-0
+      CODEX_FAILURE_ARTIFACT: codex-jira-verification-failure-0
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Download credential-free verification source
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: ${{ runner.temp }}/codex-verification-source
+
+      - name: Restore credential-free verification source
+        run: tar -xzf "$RUNNER_TEMP/codex-verification-source/codex-verification-source.tar.gz" -C "$GITHUB_WORKSPACE"
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Download Codex output
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Verify Codex patch
+        id: verify
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+        run: |
+          set +e
+          ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-verify.sh >"$RUNNER_TEMP/codex-verification.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/codex-verification.log"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            mkdir -p "$RUNNER_TEMP/codex-verification-failure"
+            cp "$RUNNER_TEMP/codex-verification.log" "$RUNNER_TEMP/codex-verification-failure/verification-failure.log"
+            tail -n 240 "$RUNNER_TEMP/codex-verification.log" >"$RUNNER_TEMP/codex-verification-failure/verification-failure-summary.log"
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Upload verified Codex output
+        if: steps.verify.outputs.passed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
+          path: |
+            ${{ runner.temp }}/codex-output/codex-pr-body.md
+            ${{ runner.temp }}/codex-output/guardrail-changes.txt
+            ${{ runner.temp }}/codex-output/verification.env
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload unverified Codex output for draft publication
+        if: steps.verify.outputs.passed != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CODEX_DRAFT_ARTIFACT }}
+          path: |
+            ${{ runner.temp }}/codex-output/codex-pr-body.md
+            ${{ runner.temp }}/codex-output/guardrail-changes.txt
+            ${{ runner.temp }}/codex-output/verification.env
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload verification failure
+        if: steps.verify.outputs.passed != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CODEX_FAILURE_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-verification-failure
+          if-no-files-found: error
+          retention-days: 1

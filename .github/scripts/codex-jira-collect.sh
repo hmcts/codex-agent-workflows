@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+required_env() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    echo "Missing required environment variable: ${name}" >&2
+    exit 1
+  fi
+}
+
+for name in CODEX_RESULT CODEX_OPERATION OUTPUT_DIR BRANCH_NAME PLAN_DIR; do
+  required_env "${name}"
+done
+
+output_dir="${OUTPUT_DIR}"
+pr_body_path="${output_dir}/codex-pr-body.md"
+metadata_path="${output_dir}/metadata.env"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=.github/scripts/codex-action-runtime.sh
+source "${script_dir}/codex-action-runtime.sh"
+
+case "${CODEX_OPERATION}" in
+  jira-generate)
+    ;;
+  jira-repair)
+    required_env "INPUT_DIR"
+    required_env "REPAIR_ATTEMPT"
+    ;;
+  *)
+    echo "Unsupported Codex Jira operation: ${CODEX_OPERATION}" >&2
+    exit 1
+    ;;
+esac
+
+mkdir -p "${output_dir}"
+validated_codex_plan_path "${PLAN_DIR}" >/dev/null
+allowed_paths_file="${PLAN_DIR}/allowed-paths.txt"
+ALLOWED_PATHS_FILE="${allowed_paths_file}" REQUIRE_CHANGES=false WRITE_PR_DETAIL_FILES=true \
+  python3 "${script_dir}/collect-codex-patch-result.py"
+summary_path="${output_dir}/codex-summary.txt"
+testing_path="${output_dir}/codex-testing.txt"
+has_changes="$(awk -F= '$1 == "has_changes" { print $2; exit }' "${output_dir}/codex-result.env")"
+
+if [[ "${has_changes}" == "false" ]]; then
+  rm -f \
+    "${output_dir}/codex-final-message.md" \
+    "${summary_path}" \
+    "${testing_path}"
+  {
+    echo "branch_name=${BRANCH_NAME}"
+    echo "has_changes=false"
+    if [[ "${CODEX_OPERATION}" == "jira-repair" ]]; then
+      echo "repair_attempt=${REPAIR_ATTEMPT}"
+    fi
+  } >"${metadata_path}"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    {
+      echo "branch_name=${BRANCH_NAME}"
+      echo "has_changes=false"
+    } >>"${GITHUB_OUTPUT}"
+  fi
+  exit 0
+fi
+
+if [[ "${has_changes}" != "true" ]]; then
+  echo "Unexpected Codex has_changes value: ${has_changes}" >&2
+  exit 1
+fi
+
+case "${CODEX_OPERATION}" in
+  jira-generate)
+    for name in ISSUE_KEY ISSUE_SUMMARY ISSUE_URL; do
+      required_env "${name}"
+    done
+    PR_BODY_PATH="${pr_body_path}" PLAN_PATH="${PLAN_DIR}/plan.json" PLAN_SHA_PATH="${PLAN_DIR}/plan.sha256" \
+      SUMMARY_PATH="${summary_path}" TESTING_PATH="${testing_path}" python3 -I - <<'PY'
+import json
+import os
+import unicodedata
+from pathlib import Path
+
+plan = json.loads(Path(os.environ["PLAN_PATH"]).read_text(encoding="utf-8"))
+plan_sha = Path(os.environ["PLAN_SHA_PATH"]).read_text(encoding="ascii").strip()
+summary = Path(os.environ["SUMMARY_PATH"]).read_text(encoding="utf-8")
+testing = Path(os.environ["TESTING_PATH"]).read_text(encoding="utf-8")
+
+
+def bullets(values):
+    return "\n".join(f"- {value}" for value in values) if values else "- None identified"
+
+
+def markdown_escape(value):
+    escaped = value
+    for character in "\\`*_{}[]<>()#+-.!|":
+        escaped = escaped.replace(character, f"\\{character}")
+    return escaped
+
+
+def render_initiator(value):
+    normalized = value.strip()
+    if len(normalized) > 200 or any(unicodedata.category(character) == "Cc" for character in normalized):
+        normalized = ""
+    return markdown_escape(normalized or "Not supplied by Jira Automation")
+
+
+initiator = render_initiator(os.environ.get("JIRA_INITIATOR_DISPLAY_NAME", ""))
+review_flag = ""
+if plan["risk_level"] == "high" or plan["cross_system_change"] or plan["sensitive_files"]:
+    review_flag = (
+        "**Prominent reviewer flag:** this plan includes high-risk, cross-system, or "
+        "sensitive-file work. Review the scope, assumptions, and affected systems before approval.\n\n"
+    )
+
+body = f"""### Jira link
+
+See [{os.environ['ISSUE_KEY']}]({os.environ['ISSUE_URL']})
+
+### Automation request
+
+Initiated in Jira by: {initiator}
+
+### Change description
+
+Implements Jira issue {os.environ['ISSUE_KEY']}: {os.environ['ISSUE_SUMMARY']}
+
+Codex ran on the Azure AKS team-managed runner scale set using the Jira issue context.
+
+#### Model-generated implementation summary
+
+{summary}
+
+### Implementation plan and review flags
+
+{review_flag}- Risk level: **{plan['risk_level']}**
+- Cross-system change: **{'yes' if plan['cross_system_change'] else 'no'}**
+
+#### Sensitive files
+
+{bullets(plan['sensitive_files'])}
+
+#### Affected systems
+
+{bullets(plan['affected_systems'])}
+
+#### Assumptions
+
+{bullets(plan['assumptions'])}
+
+#### Risks
+
+{bullets(plan['risks'])}
+
+### Testing done
+
+#### Model-generated testing details
+
+{testing}
+
+The workflow independently verifies the generated patch in a credential-free job before the trusted publish job opens the pull request. See the workflow checks for the independent verification result.
+
+### Planning audit
+
+- Validated plan SHA-256: `{plan_sha}`
+- Plan approval: automatic after trusted validation
+
+### Security Vulnerability Assessment ###
+
+**CVE Suppression:** Are there any CVEs present in the codebase (either newly introduced or pre-existing) that are being intentionally suppressed or ignored by this commit?
+  * [ ] Yes
+  * [x] No
+
+### Checklist
+
+- [x] commit messages are meaningful and follow good commit message guidelines
+- [ ] README and other documentation has been updated / added (if needed)
+- [ ] tests have been updated / new tests has been added (if needed)
+- [ ] Does this PR introduce a breaking change
+"""
+Path(os.environ["PR_BODY_PATH"]).write_text(body, encoding="utf-8")
+PY
+    ;;
+  jira-repair)
+    input_pr_body_path="${INPUT_DIR}/codex-pr-body.md"
+    if [[ -s "${input_pr_body_path}" ]]; then
+      cp "${input_pr_body_path}" "${pr_body_path}"
+    else
+      required_env "ISSUE_KEY"
+      required_env "ISSUE_URL"
+      PR_BODY_PATH="${pr_body_path}" python3 -I - <<'PY'
+import os
+import unicodedata
+from pathlib import Path
+
+
+def markdown_escape(value):
+    escaped = value
+    for character in "\\`*_{}[]<>()#+-.!|":
+        escaped = escaped.replace(character, f"\\{character}")
+    return escaped
+
+
+def render_initiator(value):
+    normalized = value.strip()
+    if len(normalized) > 200 or any(unicodedata.category(character) == "Cc" for character in normalized):
+        normalized = ""
+    return markdown_escape(normalized or "Not supplied by Jira Automation")
+
+
+initiator = render_initiator(os.environ.get("JIRA_INITIATOR_DISPLAY_NAME", ""))
+body = f"""### Jira link
+
+See [{os.environ['ISSUE_KEY']}]({os.environ['ISSUE_URL']})
+
+### Automation request
+
+Initiated in Jira by: {initiator}
+"""
+Path(os.environ["PR_BODY_PATH"]).write_text(body, encoding="utf-8")
+PY
+    fi
+    PR_BODY_PATH="${pr_body_path}" SUMMARY_PATH="${summary_path}" TESTING_PATH="${testing_path}" \
+      REPAIR_ATTEMPT="${REPAIR_ATTEMPT}" python3 -I - <<'PY'
+import os
+from pathlib import Path
+
+pr_body_path = Path(os.environ["PR_BODY_PATH"])
+summary = Path(os.environ["SUMMARY_PATH"]).read_text(encoding="utf-8")
+testing = Path(os.environ["TESTING_PATH"]).read_text(encoding="utf-8")
+with pr_body_path.open("a", encoding="utf-8") as body:
+    body.write(
+        f"\n### Model-generated repair details (attempt {os.environ['REPAIR_ATTEMPT']})\n\n"
+        f"#### Implementation summary\n\n{summary}\n\n"
+        f"#### Testing details\n\n{testing}\n"
+    )
+PY
+    ;;
+esac
+
+rm -f \
+  "${output_dir}/codex-final-message.md" \
+  "${summary_path}" \
+  "${testing_path}"
+
+{
+  echo "branch_name=${BRANCH_NAME}"
+  echo "has_changes=true"
+  if [[ "${CODEX_OPERATION}" == "jira-repair" ]]; then
+    echo "repair_attempt=${REPAIR_ATTEMPT}"
+  fi
+} >"${metadata_path}"
+
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  {
+    echo "branch_name=${BRANCH_NAME}"
+    echo "has_changes=true"
+  } >>"${GITHUB_OUTPUT}"
+fi

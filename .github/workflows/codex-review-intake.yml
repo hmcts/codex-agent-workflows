@@ -1,0 +1,133 @@
+name: Codex review intake
+
+on:
+  workflow_call:
+    outputs:
+      is_codex_pr:
+        value: ${{ jobs.detect-codex-pr.outputs.is_codex_pr }}
+      pr_number:
+        value: ${{ jobs.detect-codex-pr.outputs.pr_number }}
+      head_ref:
+        value: ${{ jobs.detect-codex-pr.outputs.head_ref }}
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  detect-codex-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      is_codex_pr: ${{ steps.detect.outputs.is_codex_pr }}
+      pr_number: ${{ steps.detect.outputs.pr_number }}
+      head_ref: ${{ steps.detect.outputs.head_ref }}
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Detect Codex PR
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          pr_number=""
+          head_ref=""
+          head_repo=""
+          body=""
+          actor_login=""
+          actor_association=""
+          actor_permission=""
+
+          write_skip() {
+            local reason="$1"
+            echo "Skipping Codex review feedback: ${reason}"
+            {
+              echo "is_codex_pr=false"
+              echo "pr_number=${pr_number}"
+              echo "head_ref=${head_ref}"
+            } >>"$GITHUB_OUTPUT"
+          }
+
+          case "$GITHUB_EVENT_NAME" in
+            issue_comment)
+              is_pr="$(jq -r '.issue | has("pull_request")' "$GITHUB_EVENT_PATH")"
+              if [[ "$is_pr" != "true" ]]; then
+                write_skip "comment is not on a pull request"
+                exit 0
+              fi
+              pr_number="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+              pull_request_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}")"
+              head_ref="$(jq -r '.head.ref' <<<"${pull_request_json}")"
+              head_repo="$(jq -r '.head.repo.full_name' <<<"${pull_request_json}")"
+              body="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
+              actor_login="$(jq -r '.comment.user.login // ""' "$GITHUB_EVENT_PATH")"
+              actor_association="$(jq -r '.comment.author_association // ""' "$GITHUB_EVENT_PATH")"
+              ;;
+            *)
+              write_skip "unsupported event: ${GITHUB_EVENT_NAME}"
+              exit 0
+              ;;
+          esac
+
+          if [[ "$head_ref" != codex/* ]]; then
+            write_skip "PR branch ${head_ref} is not a Codex branch"
+            exit 0
+          fi
+
+          if [[ "$head_repo" != "$GITHUB_REPOSITORY" ]]; then
+            write_skip "PR head repo ${head_repo} is not ${GITHUB_REPOSITORY}"
+            exit 0
+          fi
+
+          if [[ "$body" != "/codex-review" ]]; then
+            write_skip "comment body is not the exact /codex-review command"
+            exit 0
+          fi
+
+          case "$actor_association" in
+            COLLABORATOR|MEMBER|OWNER)
+              ;;
+            *)
+              write_skip "comment author association is not trusted"
+              exit 0
+              ;;
+          esac
+
+          if [[ -z "$actor_login" || "$actor_login" == "null" ]]; then
+            write_skip "comment author could not be determined"
+            exit 0
+          fi
+
+          case "$actor_login" in
+            github-actions[bot]|app/github-actions)
+              write_skip "ignoring GitHub Actions bot comment"
+              exit 0
+              ;;
+          esac
+
+          actor_permission="$(
+            gh api "repos/${GITHUB_REPOSITORY}/collaborators/${actor_login}/permission" \
+              --jq '.permission' 2>/dev/null || true
+          )"
+
+          case "$actor_permission" in
+            write|maintain|admin)
+              ;;
+            *)
+              write_skip "actor ${actor_login} does not have repository write permission"
+              exit 0
+              ;;
+          esac
+
+          {
+            echo "is_codex_pr=true"
+            echo "pr_number=${pr_number}"
+            echo "head_ref=${head_ref}"
+          } >>"$GITHUB_OUTPUT"

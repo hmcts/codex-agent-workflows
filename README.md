@@ -2,7 +2,7 @@
 
 Private reusable GitHub Actions workflows for HMCTS Codex implementation agents.
 
-The repository centralises the trusted orchestration used by application repositories while keeping repository-specific instructions and verification adapters in each caller. Callers must pin reusable workflows to a full commit SHA and pass only the declared secrets.
+The repository centralises the trusted orchestration, scripts and structured-output schemas used by application repositories while keeping repository-specific instructions and verification adapters in each caller. Callers must pin reusable workflows to a full commit SHA and pass only the declared secrets.
 
 ## Workflows
 
@@ -11,8 +11,14 @@ The repository centralises the trusted orchestration used by application reposit
 
 ## Caller requirements
 
-Each caller repository must provide the scripts and schemas documented in [`docs/caller-contract.md`](docs/caller-contract.md). Model-facing jobs run on a repository-scoped ARC runner. Collection, verification and publication run in fresh trusted jobs.
+Each caller repository must provide the thin wrappers and verification adapter documented in [`docs/caller-contract.md`](docs/caller-contract.md). Model-facing jobs run on a repository-scoped ARC runner. Collection, verification and publication run in fresh trusted jobs using the immutable runtime action packaged with this repository.
+
+The coordinated Juror configuration and activation sequence is documented in [`docs/juror-rollout.md`](docs/juror-rollout.md).
+
+The generated workflow inventory and Mermaid diagrams are available in [`docs/workflow-architecture.md`](docs/workflow-architecture.md). Regenerate that file with `.github/scripts/generate-workflow-docs.py` after changing a shared workflow.
+
+The principal runtime scripts, their trust boundaries and their hand-off contracts are documented in [`docs/script-reference.md`](docs/script-reference.md).
 
 ## Release policy
 
-Changes to reusable workflows require CODEOWNERS review. Consumers adopt releases through pull requests that update the full commit SHA in their local wrapper workflows.
+Changes to reusable workflows require CODEOWNERS review. A push to `main` runs `Update caller workflow pins`, which uses the restricted bot identity to raise full-SHA update PRs in every onboarded Juror repository. The workflow skips repositories that have not yet merged their caller wrappers.

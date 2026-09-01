@@ -1,0 +1,299 @@
+name: Codex generation stage
+
+on:
+  workflow_call:
+    inputs:
+      issueKey:
+        required: true
+        type: string
+      summary:
+        required: true
+        type: string
+      description:
+        required: true
+        type: string
+      status:
+        required: true
+        type: string
+      assignee:
+        required: true
+        type: string
+      issueUrl:
+        required: true
+        type: string
+      initiatorDisplayName:
+        required: false
+        default: ''
+        type: string
+      runner_label:
+        required: true
+        type: string
+      node_version:
+        required: false
+        default: "22"
+        type: string
+      jira_notify_timeout_seconds:
+        required: false
+        default: "10"
+        type: string
+      ready_to_implement:
+        required: true
+        type: string
+      plan_sha256:
+        required: true
+        type: string
+      plan_payload:
+        required: true
+        type: string
+      planned_path_count:
+        required: true
+        type: string
+      plan_trusted_sha:
+        required: true
+        type: string
+    outputs:
+      source_artifact:
+        value: ${{ jobs.prepare-codex-verification-source.outputs.artifact }}
+      source_sha:
+        value: ${{ jobs.prepare-codex-verification-source.outputs.source_sha }}
+      branch_name:
+        value: ${{ jobs.codex-generate.outputs.branch_name }}
+      has_changes:
+        value: ${{ jobs.codex-generate.outputs.has_changes }}
+      trusted_sha:
+        value: ${{ jobs.codex-generate.outputs.trusted_sha }}
+    secrets:
+      CODEX_OPENAI_API_KEY:
+        required: true
+      CODEX_JIRA_PR_NOTIFY_URL:
+        required: true
+
+jobs:
+  prepare-codex-verification-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      artifact: codex-verification-source
+      source_sha: ${{ steps.source.outputs.sha }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Checkout planned repository revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.plan_trusted_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build credential-free verification source
+        id: source
+        env:
+          EXPECTED_TRUSTED_SHA: ${{ inputs.plan_trusted_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${EXPECTED_TRUSTED_SHA}"
+          echo "sha=${EXPECTED_TRUSTED_SHA}" >>"$GITHUB_OUTPUT"
+          test -z "$(git config --local --get-all http.https://github.com/.extraheader || true)"
+          test -z "$(git config --local --get-all credential.helper || true)"
+          tar -czf "$RUNNER_TEMP/codex-verification-source.tar.gz" .
+
+      - name: Upload credential-free verification source
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-verification-source
+          path: ${{ runner.temp }}/codex-verification-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  codex-generate-action:
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      branch_name: ${{ steps.prepare.outputs.branch_name }}
+      codex_result: ${{ steps.codex-action.outputs.final-message }}
+      trusted_sha: ${{ steps.trusted.outputs.sha }}
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_SUMMARY: ${{ inputs.summary }}
+      ISSUE_DESCRIPTION: ${{ inputs.description }}
+      ISSUE_STATUS: ${{ inputs.status }}
+      ISSUE_ASSIGNEE: ${{ inputs.assignee }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Checkout planned repository revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.plan_trusted_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Confirm planned repository revision
+        id: trusted
+        env:
+          EXPECTED_TRUSTED_SHA: ${{ inputs.plan_trusted_sha }}
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          test "${actual_sha}" = "${EXPECTED_TRUSTED_SHA}"
+          echo "sha=${actual_sha}" >>"$GITHUB_OUTPUT"
+
+      - name: Verify runner toolchain
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-runner-preflight.sh
+
+      - name: Materialise validated Codex plan
+        env:
+          CODEX_PLAN_PAYLOAD: ${{ inputs.plan_payload }}
+          EXPECTED_PLAN_SHA: ${{ inputs.plan_sha256 }}
+          OUTPUT_DIR: ${{ runner.temp }}/codex-plan
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/validate-codex-plan.py --materialize
+
+      - name: Prepare Codex prompt
+        id: prepare
+        env:
+          PLAN_DIR: ${{ runner.temp }}/codex-plan
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-implement.sh
+
+      - name: Run Codex
+        id: codex-action
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        with:
+          allow-bot-users: hmcts-pr-publisher[bot]
+          openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
+          responses-api-endpoint: https://eu.api.openai.com/v1/responses
+          codex-version: '0.146.0'
+          model: gpt-5.6-sol
+          effort: medium
+          prompt-file: ${{ steps.prepare.outputs.prompt_path }}
+          output-schema-file: ${{ steps.prepare.outputs.schema_path }}
+          working-directory: .
+          permission-profile: ":workspace"
+          safety-strategy: unprivileged-user
+          codex-user: codex
+          codex-args: '["--ephemeral"]'
+
+  codex-generate:
+    needs: codex-generate-action
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      branch_name: ${{ steps.codex.outputs.branch_name }}
+      has_changes: ${{ steps.codex.outputs.has_changes }}
+      trusted_sha: ${{ steps.trusted.outputs.sha }}
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_SUMMARY: ${{ inputs.summary }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+      JIRA_INITIATOR_DISPLAY_NAME: ${{ inputs.initiatorDisplayName }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Checkout trusted collector
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.codex-generate-action.outputs.trusted_sha }}
+          persist-credentials: false
+
+      - name: Confirm trusted checkout SHA
+        id: trusted
+        env:
+          EXPECTED_TRUSTED_SHA: ${{ needs.codex-generate-action.outputs.trusted_sha }}
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          test "${actual_sha}" = "${EXPECTED_TRUSTED_SHA}"
+          echo "sha=${actual_sha}" >>"$GITHUB_OUTPUT"
+
+      - name: Materialise validated Codex plan
+        env:
+          CODEX_PLAN_PAYLOAD: ${{ inputs.plan_payload }}
+          EXPECTED_PLAN_SHA: ${{ inputs.plan_sha256 }}
+          OUTPUT_DIR: ${{ runner.temp }}/codex-plan
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/validate-codex-plan.py --materialize
+
+      - name: Materialise Codex patch result
+        id: codex
+        env:
+          CODEX_RESULT: ${{ needs.codex-generate-action.outputs.codex_result }}
+          CODEX_OPERATION: jira-generate
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          BRANCH_NAME: ${{ needs.codex-generate-action.outputs.branch_name }}
+          PLAN_DIR: ${{ runner.temp }}/codex-plan
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-collect.sh
+
+      - name: Upload Codex output
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-jira-output
+          path: ${{ runner.temp }}/codex-output
+          if-no-files-found: error
+          retention-days: 1
+
+  codex-generation-terminal-failed:
+    needs: [codex-generate-action, codex-generate]
+    if: |
+      always() &&
+      inputs.ready_to_implement == 'true' &&
+      (
+        needs.codex-generate.outputs.has_changes != 'true' &&
+        needs.codex-generate.outputs.has_changes != 'false'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Notify Jira that implementation generation failed
+        continue-on-error: true
+        env:
+          ACTION_OUTCOME: ${{ needs.codex-generate-action.result }}
+          COLLECTION_OUTCOME: ${{ needs.codex-generate.result }}
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --status failed \
+            --message "Codex implementation generation did not produce a trusted terminal result (action: ${ACTION_OUTCOME}; collection: ${COLLECTION_OUTCOME})."
+
+      - name: Fail implementation generation terminal handler
+        run: exit 1
+
+  codex-no-changes:
+    needs: codex-generate
+    if: always() && needs.codex-generate.result == 'success' && needs.codex-generate.outputs.has_changes == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      ISSUE_KEY: ${{ inputs.issueKey }}
+      ISSUE_URL: ${{ inputs.issueUrl }}
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Notify Jira that no repository changes are required
+        run: |
+          python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
+            --status no-changes \
+            --message "Codex completed the validated implementation plan and reported that no repository changes are required."

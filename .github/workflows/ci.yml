@@ -1,0 +1,71 @@
+name: Shared workflow CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-workflow-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate shared runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go for actionlint
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Run shared runtime tests
+        run: |
+          set -euo pipefail
+          for test_file in .github/scripts/test-*.py; do
+            python3 "${test_file}"
+          done
+
+      - name: Check shell syntax
+        run: |
+          set -euo pipefail
+          for script in .github/scripts/*.sh; do
+            bash -n "${script}"
+          done
+
+      - name: Check Ruby syntax
+        run: |
+          set -euo pipefail
+          ruby -c .github/scripts/check-codex-pr-safety.rb
+          for source in .github/scripts/lib/codex_workflow_safety/*.rb; do
+            ruby -c "${source}"
+          done
+
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck= .github/workflows/*.yml
+
+      - name: Check generated workflow documentation
+        run: python3 .github/scripts/generate-workflow-docs.py --check
+
+      - name: Check changed-file whitespace
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          base_sha="${EVENT_BASE_SHA}"
+          if [[ -z "${base_sha}" || "${base_sha}" =~ ^0+$ ]]; then
+            base_sha="$(git rev-parse HEAD^)"
+          fi
+          git diff --check "${base_sha}...HEAD"

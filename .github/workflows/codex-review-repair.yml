@@ -1,0 +1,624 @@
+name: Codex review external repair
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        required: true
+        type: string
+      node_version:
+        required: false
+        default: "22"
+        type: string
+      github_app_client_id:
+        required: true
+        type: string
+      sonar_host_url:
+        required: true
+        type: string
+      sonar_project_key:
+        required: true
+        type: string
+      required_status_context:
+        required: true
+        type: string
+      required_status_poll_seconds:
+        required: true
+        type: string
+      required_status_timeout_seconds:
+        required: true
+        type: string
+      jira_notify_timeout_seconds:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      head_ref:
+        required: true
+        type: string
+      base_ref:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      trusted_sha:
+        required: true
+        type: string
+      published_commit_sha:
+        required: true
+        type: string
+      published_output_artifact:
+        required: true
+        type: string
+      initial_passed:
+        required: true
+        type: string
+      initial_failure_artifact:
+        required: true
+        type: string
+    outputs:
+      passed:
+        value: ${{ jobs.verify-review-status-repair.outputs.passed }}
+      commit_sha:
+        value: ${{ jobs.codex-review-external-republish.outputs.commit_sha }}
+    secrets:
+      CODEX_OPENAI_API_KEY:
+        required: true
+      CODEX_GITHUB_APP_PRIVATE_KEY:
+        required: true
+      CODEX_JIRA_PR_NOTIFY_URL:
+        required: true
+      CODEX_SONAR_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-published-review-repair-source:
+    if: always() && inputs.initial_passed == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      artifact: codex-review-published-source
+      head_sha: ${{ steps.source.outputs.head_sha }}
+      base_sha: ${{ steps.source.outputs.base_sha }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Checkout trusted verifier tools
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.trusted_sha }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Checkout exact published PR revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.published_commit_sha }}
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+
+      - name: Build credential-free published review source
+        id: source
+        env:
+          HEAD_REF: ${{ inputs.head_ref }}
+          BASE_REF: ${{ inputs.base_ref }}
+          PUBLISHED_HEAD_SHA: ${{ inputs.published_commit_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+        run: |
+          cd source
+          test "$(git rev-parse HEAD)" = "${PUBLISHED_HEAD_SHA}"
+          remote_head_sha="$(git ls-remote --heads origin "refs/heads/${HEAD_REF}" | awk '{print $1}')"
+          if [[ "${remote_head_sha}" != "${PUBLISHED_HEAD_SHA}" ]]; then
+            echo "::error title=PR branch moved::The PR branch moved before external-status repair preparation. Re-run the feedback workflow."
+            exit 1
+          fi
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git update-ref "refs/remotes/origin/${HEAD_REF}" "${PUBLISHED_HEAD_SHA}"
+          git update-ref "refs/remotes/origin/${BASE_REF}" "${BASE_SHA}"
+          test -z "$(git config --local --get-all http.https://github.com/.extraheader || true)"
+          test -z "$(git config --local --get-all credential.helper || true)"
+          tar -czf "$RUNNER_TEMP/codex-review-published-source.tar.gz" .
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb "$RUNNER_TEMP/trusted-check-codex-pr-safety.rb"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh "$RUNNER_TEMP/trusted-codex-prepare-policy-candidate.sh"
+          cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
+          echo "head_sha=${PUBLISHED_HEAD_SHA}" >>"$GITHUB_OUTPUT"
+          echo "base_sha=${BASE_SHA}" >>"$GITHUB_OUTPUT"
+
+      - name: Upload credential-free published review source
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-review-published-source
+          path: |
+            ${{ runner.temp }}/codex-review-published-source.tar.gz
+            ${{ runner.temp }}/trusted-codex-pr-review-verify.sh
+            ${{ runner.temp }}/trusted-check-codex-pr-safety.rb
+            ${{ runner.temp }}/trusted-codex-prepare-policy-candidate.sh
+            ${{ runner.temp }}/trusted-codex-local-pipeline.sh
+          if-no-files-found: error
+          retention-days: 1
+
+  codex-review-external-repair-action:
+    needs: prepare-published-review-repair-source
+    if: always() && inputs.initial_passed == 'false'
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      pr_number: ${{ steps.prepare.outputs.pr_number }}
+      head_ref: ${{ steps.prepare.outputs.head_ref }}
+      base_ref: ${{ steps.prepare.outputs.base_ref }}
+      comment_author: ${{ steps.prepare.outputs.comment_author }}
+      comment_url: ${{ steps.prepare.outputs.comment_url }}
+      codex_result: ${{ steps.codex-action.outputs.final-message }}
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      REPAIR_ATTEMPT: '1'
+      MAX_CODEX_REPAIR_ATTEMPTS: '1'
+      CODEX_INPUT_ARTIFACT: ${{ inputs.published_output_artifact }}
+      CODEX_FAILURE_ARTIFACT: ${{ inputs.initial_failure_artifact }}
+      EXPECTED_HEAD_SHA: ${{ inputs.published_commit_sha }}
+      SOURCE_INCLUDES_INPUT_PATCH: 'true'
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Checkout trusted repair tooling
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.trusted_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify runner toolchain
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-runner-preflight.sh
+
+      - name: Download published Codex review output
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_INPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-input
+
+      - name: Download external status failure
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_FAILURE_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-failure
+
+      - name: Prepare external-status repair prompt
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_DIR: ${{ runner.temp }}/codex-input
+          FAILURE_DIR: ${{ runner.temp }}/codex-failure
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-repair.sh
+
+      - name: Run Codex external-status repair
+        id: codex-action
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        with:
+          allow-bot-users: hmcts-pr-publisher[bot]
+          openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
+          responses-api-endpoint: https://eu.api.openai.com/v1/responses
+          codex-version: '0.146.0'
+          model: gpt-5.6-sol
+          effort: medium
+          prompt-file: ${{ steps.prepare.outputs.prompt_path }}
+          output-schema-file: ${{ steps.prepare.outputs.schema_path }}
+          working-directory: .
+          permission-profile: ':workspace'
+          safety-strategy: unprivileged-user
+          codex-user: codex
+          codex-args: '["--ephemeral"]'
+
+  codex-review-external-repair:
+    needs: [prepare-published-review-repair-source, codex-review-external-repair-action]
+    if: always() && needs.codex-review-external-repair-action.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      has_changes: ${{ steps.repair.outputs.has_changes }}
+    env:
+      CODEX_INPUT_ARTIFACT: ${{ inputs.published_output_artifact }}
+      CODEX_OUTPUT_ARTIFACT: codex-review-output-external-repair-1
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Checkout trusted collector
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.trusted_sha }}
+          persist-credentials: false
+
+      - name: Download published Codex review output
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_INPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-input
+
+      - name: Materialise external-status repair patch
+        id: repair
+        env:
+          CODEX_RESULT: ${{ needs.codex-review-external-repair-action.outputs.codex_result }}
+          INPUT_DIR: ${{ runner.temp }}/codex-input
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          REPAIR_ATTEMPT: '1'
+          PR_NUMBER: ${{ needs.codex-review-external-repair-action.outputs.pr_number }}
+          HEAD_REF: ${{ needs.codex-review-external-repair-action.outputs.head_ref }}
+          BASE_REF: ${{ needs.codex-review-external-repair-action.outputs.base_ref }}
+          HEAD_SHA: ${{ needs.prepare-published-review-repair-source.outputs.head_sha }}
+          BASE_SHA: ${{ needs.prepare-published-review-repair-source.outputs.base_sha }}
+          COMMENT_AUTHOR: ${{ needs.codex-review-external-repair-action.outputs.comment_author }}
+          COMMENT_URL: ${{ needs.codex-review-external-repair-action.outputs.comment_url }}
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-repair-collect.sh
+
+      - name: Upload external-status repair output
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+          if-no-files-found: error
+          retention-days: 1
+
+  codex-review-external-repair-verify:
+    needs: [codex-review-external-repair, prepare-published-review-repair-source]
+    if: needs.codex-review-external-repair.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions: {}
+    outputs:
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
+      output_artifact: codex-review-output-external-repair-1
+      verified_artifact: codex-review-verified-external-repair-1
+      failure_artifact: codex-review-external-repair-verification-failure-1
+    env:
+      EXPECTED_PR_NUMBER: ${{ inputs.pr_number }}
+      EXPECTED_HEAD_REF: ${{ inputs.head_ref }}
+      EXPECTED_BASE_REF: ${{ inputs.base_ref }}
+      EXPECTED_HEAD_SHA: ${{ needs.prepare-published-review-repair-source.outputs.head_sha }}
+      EXPECTED_BASE_SHA: ${{ needs.prepare-published-review-repair-source.outputs.base_sha }}
+      LOCAL_PIPELINE_MODE: fast
+      CODEX_OUTPUT_ARTIFACT: codex-review-output-external-repair-1
+      CODEX_VERIFIED_ARTIFACT: codex-review-verified-external-repair-1
+      CODEX_FAILURE_ARTIFACT: codex-review-external-repair-verification-failure-1
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Download credential-free published review source
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-published-review-repair-source.outputs.artifact }}
+          path: ${{ runner.temp }}/codex-review-verification-source
+
+      - name: Restore credential-free published review source
+        run: tar -xzf "$RUNNER_TEMP/codex-review-verification-source/codex-review-published-source.tar.gz" -C "$GITHUB_WORKSPACE"
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Download external-status repair output
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Verify external-status repair patch
+        id: verify
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
+          TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-check-codex-pr-safety.rb
+          TRUSTED_POLICY_PREPARER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-prepare-policy-candidate.sh
+        run: |
+          set +e
+          bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh" >"$RUNNER_TEMP/codex-review-external-repair-verification.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/codex-review-external-repair-verification.log"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            mkdir -p "$RUNNER_TEMP/codex-review-external-repair-verification-failure"
+            cp "$RUNNER_TEMP/codex-review-external-repair-verification.log" "$RUNNER_TEMP/codex-review-external-repair-verification-failure/verification-failure.log"
+            tail -n 240 "$RUNNER_TEMP/codex-review-external-repair-verification.log" >"$RUNNER_TEMP/codex-review-external-repair-verification-failure/verification-failure-summary.log"
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Upload verified external-status repair
+        if: steps.verify.outputs.passed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
+          path: |
+            ${{ runner.temp }}/codex-output/changes.patch
+            ${{ runner.temp }}/codex-output/codex-review-comment.md
+            ${{ runner.temp }}/codex-output/guardrail-changes.txt
+            ${{ runner.temp }}/codex-output/verification.env
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload external-status repair verification failure
+        if: steps.verify.outputs.passed != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CODEX_FAILURE_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-review-external-repair-verification-failure
+          if-no-files-found: error
+          retention-days: 1
+
+  codex-review-external-republish:
+    needs: [codex-review-external-repair-verify, prepare-published-review-repair-source]
+    if: always() && needs.codex-review-external-repair-verify.outputs.passed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      pr_number: ${{ steps.publish.outputs.pr_number }}
+      commit_sha: ${{ steps.publish.outputs.commit_sha }}
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      EXPECTED_PR_NUMBER: ${{ inputs.pr_number }}
+      EXPECTED_HEAD_REF: ${{ inputs.head_ref }}
+      EXPECTED_HEAD_SHA: ${{ needs.prepare-published-review-repair-source.outputs.head_sha }}
+      EXPECTED_BASE_SHA: ${{ inputs.base_sha }}
+      POLICY_CANDIDATE_BASE_SHA: ${{ needs.prepare-published-review-repair-source.outputs.head_sha }}
+      CODEX_OUTPUT_ARTIFACT: ${{ needs.codex-review-external-repair-verify.outputs.output_artifact }}
+      CODEX_VERIFIED_ARTIFACT: ${{ needs.codex-review-external-repair-verify.outputs.verified_artifact }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Checkout current default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DEFAULT_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve current default revision
+        id: current-default
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          checkout_sha="$(git rev-parse HEAD)"
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${DEFAULT_BRANCH}" --jq '.object.sha')"
+          if [[ ! "${current_sha}" =~ ^[0-9a-f]{40}$ || "${checkout_sha}" != "${current_sha}" ]]; then
+            echo "::error title=Default branch moved::The current default workflow tree could not be prepared at a stable revision."
+            exit 1
+          fi
+          echo "sha=${current_sha}" >>"$GITHUB_OUTPUT"
+
+      - name: Checkout candidate policy base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: codex-policy-candidate
+
+      - name: Download external-status repair output
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Materialize candidate policy tree
+        env:
+          CANDIDATE_ROOT: ${{ github.workspace }}/codex-policy-candidate
+          EXPECTED_CANDIDATE_SHA: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
+          PATCH_PATH: ${{ runner.temp }}/codex-output/changes.patch
+        run: '"${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh"'
+
+      - name: Enforce pull-request credential isolation
+        run: |
+          ruby --disable-gems "${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb" \
+            --repository-root "$GITHUB_WORKSPACE/codex-policy-candidate" \
+            --trusted-repository-root "$GITHUB_WORKSPACE"
+
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ inputs.github_app_client_id }}
+          private-key: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Verify GitHub App publisher
+        id: publisher
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GITHUB_APP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
+
+      - name: Copy trusted publish script
+        run: |
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-publish.sh "$RUNNER_TEMP/codex-pr-review-publish.sh"
+          chmod +x "$RUNNER_TEMP/codex-pr-review-publish.sh"
+
+      - name: Download verified external-status repair
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-verified
+
+      - name: Re-publish external-status repair
+        id: publish
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BOT_PUBLISHER_LOGIN: ${{ steps.publisher.outputs.publisher_login }}
+          BOT_PUBLISHER_EMAIL: ${{ steps.publisher.outputs.publisher_email }}
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          VERIFICATION_DIR: ${{ runner.temp }}/codex-verified
+          EXPECTED_DEFAULT_SHA: ${{ steps.current-default.outputs.sha }}
+        run: "$RUNNER_TEMP/codex-pr-review-publish.sh"
+
+  verify-review-status-repair:
+    needs: codex-review-external-republish
+    if: always() && needs.codex-review-external-republish.outputs.commit_sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
+      failure_artifact: codex-review-external-status-failure-repair-1
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
+      SONAR_PROJECT_KEY: ${{ inputs.sonar_project_key }}
+      PR_NUMBER: ${{ needs.codex-review-external-republish.outputs.pr_number }}
+      PUBLISHED_COMMIT_SHA: ${{ needs.codex-review-external-republish.outputs.commit_sha }}
+      REQUIRED_STATUS_CONTEXT: ${{ inputs.required_status_context }}
+      REQUIRED_STATUS_TIMEOUT_SECONDS: ${{ inputs.required_status_timeout_seconds }}
+      REQUIRED_STATUS_POLL_SECONDS: ${{ inputs.required_status_poll_seconds }}
+      STATUS_FAILURE_ARTIFACT: codex-review-external-status-failure-repair-1
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Checkout trusted status scripts
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.trusted_sha }}
+          persist-credentials: false
+
+      - name: Check repaired external PR status and Sonar quality gate
+        id: verify
+        run: |
+          set +e
+          {
+            ${CODEX_RUNTIME_PATH}/.github/scripts/codex-wait-pr-status.sh &&
+              ${CODEX_RUNTIME_PATH}/.github/scripts/codex-check-sonar-quality-gate.sh
+          } >"$RUNNER_TEMP/codex-review-repaired-status.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/codex-review-repaired-status.log"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            mkdir -p "$RUNNER_TEMP/codex-review-repaired-status-failure"
+            cp "$RUNNER_TEMP/codex-review-repaired-status.log" "$RUNNER_TEMP/codex-review-repaired-status-failure/verification-failure.log"
+            tail -n 240 "$RUNNER_TEMP/codex-review-repaired-status.log" >"$RUNNER_TEMP/codex-review-repaired-status-failure/verification-failure-summary.log"
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Upload repaired external status failure
+        if: steps.verify.outputs.passed != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.STATUS_FAILURE_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-review-repaired-status-failure
+          if-no-files-found: error
+          retention-days: 1
+
+  codex-review-external-verification-failed:
+    needs:
+      [
+        codex-review-external-repair-action,
+        codex-review-external-repair-verify,
+        codex-review-external-republish,
+        verify-review-status-repair,
+      ]
+    if: |
+      always() &&
+      inputs.published_commit_sha != '' &&
+      inputs.initial_passed != 'true' &&
+      needs.verify-review-status-repair.outputs.passed != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    env:
+      PR_NUMBER: ${{ needs.codex-review-external-republish.outputs.pr_number || inputs.pr_number }}
+      EXPECTED_HEAD_SHA: ${{ needs.codex-review-external-republish.outputs.commit_sha || inputs.published_commit_sha }}
+      FAILURE_ARTIFACT: ${{ needs.verify-review-status-repair.outputs.failure_artifact || needs.codex-review-external-repair-verify.outputs.failure_artifact || inputs.initial_failure_artifact }}
+      FAILURE_MESSAGE: Required Jenkins, Sonar, or credential-free verification failed after the available automated review-feedback repair attempt.
+      CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
+      CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ inputs.github_app_client_id }}
+          private-key: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Verify GitHub App publisher
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GITHUB_APP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+        run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
+
+      - name: Download final verification failure
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.FAILURE_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-review-terminal-failure
+
+      - name: Return failed pull request to draft
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          FAILURE_DIR: ${{ runner.temp }}/codex-review-terminal-failure
+          NOTIFY_JIRA: "true"
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-mark-pr-failed.sh
+
+      - name: Fail after bounded external-status repair
+        run: |
+          echo "Codex review feedback still fails verification after one repair attempt; the PR was returned to draft."
+          exit 1

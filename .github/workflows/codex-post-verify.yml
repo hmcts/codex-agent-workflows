@@ -1,0 +1,211 @@
+name: Codex published PR verification
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        required: false
+        default: "22"
+        type: string
+      sonar_host_url:
+        required: true
+        type: string
+      sonar_project_key:
+        required: true
+        type: string
+      required_status_context:
+        required: true
+        type: string
+      required_status_poll_seconds:
+        required: true
+        type: string
+      required_status_timeout_seconds:
+        required: true
+        type: string
+      branch_name:
+        required: true
+        type: string
+      trusted_sha:
+        required: true
+        type: string
+      source_artifact:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      commit_sha:
+        required: true
+        type: string
+      output_artifact:
+        required: true
+        type: string
+    outputs:
+      passed:
+        value: ${{ jobs.verify-published-pr.outputs.passed }}
+      output_artifact:
+        value: ${{ jobs.verify-published-pr.outputs.output_artifact }}
+      failure_artifact:
+        value: ${{ jobs.verify-published-pr.outputs.failure_artifact }}
+    secrets:
+      CODEX_SONAR_TOKEN:
+        required: false
+
+jobs:
+  verify-published-pr-patch:
+    if: inputs.pr_number != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions: {}
+    outputs:
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
+      output_artifact: ${{ steps.selected-artifacts.outputs.output_artifact }}
+      failure_artifact: ${{ steps.selected-artifacts.outputs.failure_artifact }}
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      EXPECTED_BRANCH_NAME: ${{ inputs.branch_name }}
+      LOCAL_PIPELINE_MODE: fast
+      CODEX_OUTPUT_ARTIFACT: ${{ inputs.output_artifact }}
+      CODEX_FAILURE_ARTIFACT: codex-jira-pr-verification-failure-0
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Record selected Codex artifacts
+        id: selected-artifacts
+        run: |
+          echo "output_artifact=${CODEX_OUTPUT_ARTIFACT}" >>"$GITHUB_OUTPUT"
+          echo "failure_artifact=${CODEX_FAILURE_ARTIFACT}" >>"$GITHUB_OUTPUT"
+
+      - name: Download credential-free verification source
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: ${{ runner.temp }}/codex-verification-source
+
+      - name: Restore credential-free verification source
+        run: tar -xzf "$RUNNER_TEMP/codex-verification-source/codex-verification-source.tar.gz" -C "$GITHUB_WORKSPACE"
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Download Codex output
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Verify published PR patch without credentials
+        id: verify
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+        run: |
+          set +e
+          ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-verify.sh >"$RUNNER_TEMP/codex-pr-verification.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/codex-pr-verification.log"
+          if [[ "$status" -eq 0 ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            mkdir -p "$RUNNER_TEMP/codex-pr-verification-failure"
+            cp "$RUNNER_TEMP/codex-pr-verification.log" "$RUNNER_TEMP/codex-pr-verification-failure/verification-failure.log"
+            tail -n 240 "$RUNNER_TEMP/codex-pr-verification.log" >"$RUNNER_TEMP/codex-pr-verification-failure/verification-failure-summary.log"
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Upload PR verification failure
+        if: steps.verify.outputs.passed != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CODEX_FAILURE_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-pr-verification-failure
+          if-no-files-found: error
+          retention-days: 1
+
+  verify-published-pr:
+    needs: verify-published-pr-patch
+    if: inputs.pr_number != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
+      output_artifact: ${{ needs.verify-published-pr-patch.outputs.output_artifact }}
+      failure_artifact: ${{ steps.verify.outputs.failure_artifact }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
+      SONAR_PROJECT_KEY: ${{ inputs.sonar_project_key }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      PUBLISHED_COMMIT_SHA: ${{ inputs.commit_sha }}
+      REQUIRED_STATUS_CONTEXT: ${{ inputs.required_status_context }}
+      REQUIRED_STATUS_TIMEOUT_SECONDS: ${{ inputs.required_status_timeout_seconds }}
+      REQUIRED_STATUS_POLL_SECONDS: ${{ inputs.required_status_poll_seconds }}
+      STATUS_FAILURE_ARTIFACT: codex-jira-pr-status-failure-0
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@0a744ceb249988e5153f4a5f078ff2584b6a7f23
+
+      - name: Checkout trusted status scripts
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.trusted_sha }}
+          persist-credentials: false
+      - name: Check external PR status and Sonar quality gate
+        id: verify
+        env:
+          LOCAL_VERIFICATION_PASSED: ${{ needs.verify-published-pr-patch.outputs.passed }}
+          LOCAL_FAILURE_ARTIFACT: ${{ needs.verify-published-pr-patch.outputs.failure_artifact }}
+        run: |
+          if [[ "$LOCAL_VERIFICATION_PASSED" != "true" ]]; then
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+            echo "failure_artifact=$LOCAL_FAILURE_ARTIFACT" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set +e
+          {
+            ${CODEX_RUNTIME_PATH}/.github/scripts/codex-wait-pr-status.sh
+            status=$?
+            if [[ "$status" -eq 0 ]]; then
+              ${CODEX_RUNTIME_PATH}/.github/scripts/codex-check-sonar-quality-gate.sh
+              status=$?
+            fi
+            exit "$status"
+          } >"$RUNNER_TEMP/codex-pr-status.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/codex-pr-status.log"
+          echo "failure_artifact=$STATUS_FAILURE_ARTIFACT" >>"$GITHUB_OUTPUT"
+          if [[ "$status" -eq 0 ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            mkdir -p "$RUNNER_TEMP/codex-pr-status-failure"
+            cp "$RUNNER_TEMP/codex-pr-status.log" "$RUNNER_TEMP/codex-pr-status-failure/verification-failure.log"
+            tail -n 240 "$RUNNER_TEMP/codex-pr-status.log" >"$RUNNER_TEMP/codex-pr-status-failure/verification-failure-summary.log"
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+          exit 0
+      - name: Upload external status failure
+        if: >-
+          steps.verify.outputs.passed != 'true' &&
+          needs.verify-published-pr-patch.outputs.passed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.STATUS_FAILURE_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-pr-status-failure
+          if-no-files-found: error
+          retention-days: 1

@@ -1,0 +1,175 @@
+name: Update caller workflow pins
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/runtime/**
+      - .github/schemas/**
+      - .github/scripts/**
+      - '.github/workflows/codex-*.yml'
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Shared workflow commit to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-caller-pin-release
+  cancel-in-progress: false
+
+jobs:
+  update-caller:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repository:
+          - hmcts/juror-er-portal
+          - hmcts/juror-public
+          - hmcts/juror-bureau
+          - hmcts/juror-api
+          - hmcts/juror-scheduler-execution
+          - hmcts/juror-pnc
+          - hmcts/juror-scheduler-api
+    env:
+      TARGET_REPOSITORY: ${{ matrix.repository }}
+      RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
+
+    steps:
+      - name: Checkout shared workflow repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.CODEX_GITHUB_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            codex-agent-workflows
+            ${{ matrix.repository }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Verify GitHub App publisher
+        id: publisher
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GITHUB_APP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+          CODEX_PUBLISHER_REPOSITORY: ${{ matrix.repository }}
+        run: python3 -I .github/scripts/codex-verify-publisher.py
+
+      - name: Verify release identity and revision
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          [[ "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test -n "${GH_TOKEN}"
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_SHA}" >/dev/null
+          merge_base="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/compare/${RELEASE_SHA}...main" \
+              --jq .merge_base_commit.sha
+          )"
+          test "${merge_base}" = "${RELEASE_SHA}"
+
+      - name: Raise caller pin update
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_BRANCH: master
+        run: |
+          set -euo pipefail
+
+          branch="codex/update-agent-workflows-${RELEASE_SHA:0:12}"
+          base_sha="$(gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${TARGET_BRANCH}" --jq .object.sha)"
+          update_dir="$RUNNER_TEMP/caller-update"
+          mkdir -p "${update_dir}"
+          changed=false
+          for path in .github/workflows/codex_jira_dispatch.yml .github/workflows/codex_pr_review.yml; do
+            name="$(basename "${path}")"
+            api_error="${update_dir}/${name}.api-error"
+            if ! metadata="$(gh api "repos/${TARGET_REPOSITORY}/contents/${path}?ref=${TARGET_BRANCH}" 2>"${api_error}")"; then
+              if python3 -I .github/scripts/is-explicit-contents-404.py "${api_error}"; then
+                echo "${TARGET_REPOSITORY} does not contain ${path}; skipping this release."
+                exit 0
+              fi
+              cat "${api_error}" >&2
+              echo "::error title=Caller workflow lookup failed::Unable to inspect ${TARGET_REPOSITORY}/${path}; only an explicit Contents API HTTP 404 may be treated as not onboarded." >&2
+              exit 1
+            fi
+            if [[ -z "${metadata}" ]]; then
+              echo "::error title=Empty Contents API response::Unable to validate ${TARGET_REPOSITORY}/${path}; refusing to treat an empty response as not onboarded." >&2
+              exit 1
+            fi
+
+            blob_sha="$(jq -r .sha <<<"${metadata}")"
+            input_path="${update_dir}/${name}.input"
+            output_path="${update_dir}/${name}.output"
+            jq -r .content <<<"${metadata}" | base64 --decode >"${input_path}"
+            python3 -I .github/scripts/update-caller-workflow.py \
+              --workflow "${path}" \
+              --release-sha "${RELEASE_SHA}" \
+              --input "${input_path}" \
+              --output "${output_path}"
+            printf '%s\n' "${blob_sha}" >"${update_dir}/${name}.sha"
+            if ! cmp -s "${input_path}" "${output_path}"; then
+              changed=true
+            fi
+          done
+
+          if [[ "${changed}" != "true" ]]; then
+            echo "${TARGET_REPOSITORY} already uses ${RELEASE_SHA}."
+            exit 0
+          fi
+
+          existing="$(gh pr list --repo "${TARGET_REPOSITORY}" --head "${branch}" --state open --json url --jq '.[0].url // empty')"
+          if [[ -n "${existing}" ]]; then
+            echo "Caller update already open: ${existing}"
+            exit 0
+          fi
+
+          if gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${branch}" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/${TARGET_REPOSITORY}/git/refs/heads/${branch}" \
+              -f sha="${base_sha}" \
+              -F force=true >/dev/null
+          else
+            gh api --method POST "repos/${TARGET_REPOSITORY}/git/refs" \
+              -f ref="refs/heads/${branch}" \
+              -f sha="${base_sha}" >/dev/null
+          fi
+
+          for path in .github/workflows/codex_jira_dispatch.yml .github/workflows/codex_pr_review.yml; do
+            name="$(basename "${path}")"
+            input_path="${update_dir}/${name}.input"
+            output_path="${update_dir}/${name}.output"
+            if cmp -s "${input_path}" "${output_path}"; then
+              continue
+            fi
+            blob_sha="$(cat "${update_dir}/${name}.sha")"
+            encoded="$(base64 <"${output_path}" | tr -d '\n')"
+            gh api --method PUT "repos/${TARGET_REPOSITORY}/contents/${path}" \
+              -f message="Update Codex shared workflows to ${RELEASE_SHA:0:12}" \
+              -f content="${encoded}" \
+              -f sha="${blob_sha}" \
+              -f branch="${branch}" >/dev/null
+          done
+
+          gh pr create \
+            --repo "${TARGET_REPOSITORY}" \
+            --base "${TARGET_BRANCH}" \
+            --head "${branch}" \
+            --title "Update Codex shared workflows to ${RELEASE_SHA:0:12}" \
+            --body "Pins the Juror Codex caller workflows to the reviewed shared release at \`${RELEASE_SHA}\`."
