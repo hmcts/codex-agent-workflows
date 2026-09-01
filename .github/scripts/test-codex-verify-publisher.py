@@ -31,15 +31,11 @@ class PublisherValidationTests(unittest.TestCase):
     def payloads(self) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         return (
             {
-                "id": 12345,
-                "app_slug": "hmcts-codex-agent",
-                "account": {"login": "hmcts"},
-                "permissions": {
-                    "contents": "write",
-                    "pull_requests": "write",
-                    "issues": "write",
-                    "workflows": "write",
-                },
+                "total_count": 2,
+                "repositories": [
+                    {"full_name": "hmcts/codex-agent-workflows"},
+                    {"full_name": "hmcts/appreg-api"},
+                ],
             },
             {
                 "full_name": "hmcts/appreg-api",
@@ -49,12 +45,12 @@ class PublisherValidationTests(unittest.TestCase):
         )
 
     def validate(self, **overrides: Any) -> tuple[str, str]:
-        installation, repository, bot = self.payloads()
+        repositories, repository, bot = self.payloads()
         return MODULE.validate_publisher(
             overrides.get("app_slug", "hmcts-codex-agent"),
             overrides.get("installation_id", "12345"),
             overrides.get("repository_name", "hmcts/appreg-api"),
-            overrides.get("installation", installation),
+            overrides.get("repositories", repositories),
             overrides.get("repository", repository),
             overrides.get("bot", bot),
         )
@@ -64,25 +60,32 @@ class PublisherValidationTests(unittest.TestCase):
         self.assertEqual(login, "hmcts-codex-agent[bot]")
         self.assertEqual(email, "98765+hmcts-codex-agent[bot]@users.noreply.github.com")
 
-    def test_rejects_unexpected_app(self) -> None:
-        with self.assertRaisesRegex(MODULE.PublisherVerificationError, "expected another-app"):
-            self.validate(app_slug="another-app")
+    def test_rejects_invalid_app_slug(self) -> None:
+        with self.assertRaisesRegex(MODULE.PublisherVerificationError, "valid GitHub App slug"):
+            self.validate(app_slug="../another-app")
 
-    def test_rejects_unexpected_installation(self) -> None:
-        with self.assertRaisesRegex(MODULE.PublisherVerificationError, "unexpected App installation"):
-            self.validate(installation_id="54321")
+    def test_rejects_invalid_installation_id(self) -> None:
+        with self.assertRaisesRegex(MODULE.PublisherVerificationError, "is not valid"):
+            self.validate(installation_id="not-an-id")
 
     def test_rejects_installation_owned_by_another_account(self) -> None:
-        installation, _, _ = self.payloads()
-        installation["account"]["login"] = "another-org"
-        with self.assertRaisesRegex(MODULE.PublisherVerificationError, "not owned by hmcts"):
-            self.validate(installation=installation)
+        repositories, _, _ = self.payloads()
+        repositories["repositories"][0]["full_name"] = "another-org/codex-agent-workflows"
+        with self.assertRaisesRegex(MODULE.PublisherVerificationError, "owned by hmcts"):
+            self.validate(repositories=repositories)
 
-    def test_rejects_missing_installation_permission(self) -> None:
-        installation, _, _ = self.payloads()
-        installation["permissions"]["issues"] = "read"
-        with self.assertRaisesRegex(MODULE.PublisherVerificationError, "lacks required"):
-            self.validate(installation=installation)
+    def test_rejects_token_without_expected_repository(self) -> None:
+        repositories, _, _ = self.payloads()
+        repositories["repositories"] = [
+            {"full_name": "hmcts/codex-agent-workflows"}
+        ]
+        repositories["total_count"] = 1
+        with self.assertRaisesRegex(MODULE.PublisherVerificationError, "cannot access expected"):
+            self.validate(repositories=repositories)
+
+    def test_rejects_invalid_accessible_repositories_payload(self) -> None:
+        with self.assertRaisesRegex(MODULE.PublisherVerificationError, "invalid accessible"):
+            self.validate(repositories={"total_count": 1, "repositories": "invalid"})
 
     def test_rejects_token_without_push_permission(self) -> None:
         _, repository, _ = self.payloads()
@@ -116,8 +119,14 @@ class PublisherValidationTests(unittest.TestCase):
             return Response(json.dumps({"id": 12345}).encode())
 
         client = MODULE.GitHubClient("https://api.github.test", "test-secret", opener=opener)
-        self.assertEqual(client.get_json("/installation"), {"id": 12345})
-        self.assertEqual(captured["url"], "https://api.github.test/installation")
+        self.assertEqual(
+            client.get_json("/installation/repositories?per_page=100"),
+            {"id": 12345},
+        )
+        self.assertEqual(
+            captured["url"],
+            "https://api.github.test/installation/repositories?per_page=100",
+        )
         self.assertEqual(captured["authorization"], "Bearer test-secret")
         self.assertEqual(captured["timeout"], 20)
 

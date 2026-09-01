@@ -38,25 +38,24 @@ def workflow_job(workflow: Path, job_name: str) -> str:
 
 
 class WorkflowContractTests(unittest.TestCase):
-    def test_internal_reusable_workflow_pins_package_the_referenced_component(self):
-        pattern = re.compile(
-            r"uses: hmcts/codex-agent-workflows/(\.github/workflows/[^@\s]+)@([0-9a-f]{40})"
+    def test_internal_reusable_workflows_use_same_release_components(self):
+        pattern = re.compile(r"uses: \./(\.github/workflows/[^\s]+)")
+        external_pattern = re.compile(
+            r"uses: hmcts/codex-agent-workflows/\.github/workflows/[^@\s]+@"
         )
         references = []
         for workflow in COMPONENT_WORKFLOWS:
-            references.extend(pattern.findall(workflow.read_text(encoding="utf-8")))
-        self.assertTrue(references)
-        for path, pin in references:
-            completed = subprocess.run(
-                ["git", "cat-file", "-e", f"{pin}:{path}"],
-                cwd=ROOT.parent,
-                capture_output=True,
-                text=True,
+            content = workflow.read_text(encoding="utf-8")
+            self.assertIsNone(
+                external_pattern.search(content),
+                f"{workflow.name} must load internal stages from the caller release",
             )
-            self.assertEqual(
-                completed.returncode,
-                0,
-                f"immutable workflow {pin} does not package {path}: {completed.stderr}",
+            references.extend(pattern.findall(content))
+        self.assertTrue(references)
+        for path in references:
+            self.assertTrue(
+                (ROOT.parent / path).is_file(),
+                f"same-release workflow component is missing: {path}",
             )
 
     def test_immutable_runtime_pin_packages_policy_preparer(self):

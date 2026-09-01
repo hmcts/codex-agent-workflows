@@ -63,7 +63,7 @@ def validate_publisher(
     expected_app_slug: str,
     expected_installation_id: str,
     repository: str,
-    installation_payload: dict[str, Any],
+    repositories_payload: dict[str, Any],
     repository_payload: dict[str, Any],
     bot_payload: dict[str, Any],
 ) -> tuple[str, str]:
@@ -79,33 +79,36 @@ def validate_publisher(
     ):
         raise PublisherVerificationError("GITHUB_REPOSITORY is not a valid owner/repository name")
 
-    if installation_payload.get("id") != int(expected_installation_id):
-        raise PublisherVerificationError("Publisher token resolved an unexpected App installation")
-    actual_app_slug = installation_payload.get("app_slug")
-    if not isinstance(actual_app_slug, str) or actual_app_slug.casefold() != expected_app_slug.casefold():
-        raise PublisherVerificationError(
-            f"Publisher token belongs to App {actual_app_slug!r}, expected {expected_app_slug}"
-        )
-
-    installation_account = installation_payload.get("account")
     expected_owner = repository_parts[0]
+    accessible_repositories = repositories_payload.get("repositories")
+    total_count = repositories_payload.get("total_count")
     if (
-        not isinstance(installation_account, dict)
-        or not isinstance(installation_account.get("login"), str)
-        or installation_account["login"].casefold() != expected_owner.casefold()
+        not isinstance(accessible_repositories, list)
+        or isinstance(total_count, bool)
+        or not isinstance(total_count, int)
+        or total_count < 1
     ):
         raise PublisherVerificationError(
-            f"GitHub App installation is not owned by {expected_owner}"
+            "Publisher token returned an invalid accessible-repositories payload"
         )
 
-    installation_permissions = installation_payload.get("permissions")
-    required_permissions = ("contents", "pull_requests", "issues", "workflows")
-    if not isinstance(installation_permissions, dict) or any(
-        installation_permissions.get(permission) != "write"
-        for permission in required_permissions
-    ):
+    accessible_names: list[str] = []
+    for item in accessible_repositories:
+        if not isinstance(item, dict) or not isinstance(item.get("full_name"), str):
+            raise PublisherVerificationError(
+                "Publisher token returned invalid accessible repository metadata"
+            )
+        full_name = item["full_name"]
+        parts = full_name.split("/")
+        if len(parts) != 2 or parts[0].casefold() != expected_owner.casefold():
+            raise PublisherVerificationError(
+                f"Publisher token is not restricted to repositories owned by {expected_owner}"
+            )
+        accessible_names.append(full_name.casefold())
+
+    if repository.casefold() not in accessible_names:
         raise PublisherVerificationError(
-            "GitHub App installation lacks required contents, pull requests, issues or workflows write permission"
+            f"Publisher token cannot access expected repository {repository}"
         )
 
     full_name = repository_payload.get("full_name")
@@ -114,10 +117,10 @@ def validate_publisher(
     repository_permissions = repository_payload.get("permissions")
     if not isinstance(repository_permissions, dict) or repository_permissions.get("push") is not True:
         raise PublisherVerificationError(
-            f"GitHub App {actual_app_slug} does not have push permission for {repository}"
+            f"GitHub App {expected_app_slug} does not have push permission for {repository}"
         )
 
-    expected_bot_login = f"{actual_app_slug}[bot]"
+    expected_bot_login = f"{expected_app_slug}[bot]"
     actual_bot_login = bot_payload.get("login")
     bot_id = bot_payload.get("id")
     if (
@@ -155,7 +158,7 @@ def main() -> int:
             expected_app_slug,
             expected_installation_id,
             repository,
-            client.get_json("/installation"),
+            client.get_json("/installation/repositories?per_page=100"),
             client.get_json(f"/repos/{repository}"),
             client.get_json(f"/users/{encoded_bot_login}"),
         )
