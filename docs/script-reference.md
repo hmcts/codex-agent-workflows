@@ -254,10 +254,10 @@ token has been minted and before publication begins.
 
 The script queries GitHub using `GH_TOKEN` and verifies that:
 
-- the token belongs to the expected App slug and installation ID;
-- the installation belongs to the target repository owner;
-- the installation has write access for contents, pull requests, issues and
-  workflows;
+- the pinned token-minting action supplied valid App slug and installation ID
+  metadata;
+- the installation token can list the expected repository and is restricted to the
+  target repository owner;
 - the token resolves the expected repository with push permission; and
 - the publisher identity is the corresponding `<app-slug>[bot]` account.
 
