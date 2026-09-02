@@ -39,7 +39,6 @@ class PublisherValidationTests(unittest.TestCase):
             },
             {
                 "full_name": "hmcts/appreg-api",
-                "permissions": {"pull": True, "push": True},
             },
             {"login": "hmcts-codex-agent[bot]", "id": 98765, "type": "Bot"},
         )
@@ -55,7 +54,7 @@ class PublisherValidationTests(unittest.TestCase):
             overrides.get("bot", bot),
         )
 
-    def test_accepts_expected_app_installation_with_push_permission(self) -> None:
+    def test_accepts_expected_app_installation(self) -> None:
         login, email = self.validate()
         self.assertEqual(login, "hmcts-codex-agent[bot]")
         self.assertEqual(email, "98765+hmcts-codex-agent[bot]@users.noreply.github.com")
@@ -87,11 +86,11 @@ class PublisherValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.PublisherVerificationError, "invalid accessible"):
             self.validate(repositories={"total_count": 1, "repositories": "invalid"})
 
-    def test_rejects_token_without_push_permission(self) -> None:
+    def test_does_not_treat_repository_push_field_as_app_permission(self) -> None:
         _, repository, _ = self.payloads()
-        repository["permissions"]["push"] = False
-        with self.assertRaisesRegex(MODULE.PublisherVerificationError, "does not have push"):
-            self.validate(repository=repository)
+        repository["permissions"] = {"pull": True, "push": False}
+        login, _ = self.validate(repository=repository)
+        self.assertEqual(login, "hmcts-codex-agent[bot]")
 
     def test_rejects_unexpected_repository(self) -> None:
         _, repository, _ = self.payloads()

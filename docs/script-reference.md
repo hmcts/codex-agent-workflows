@@ -258,13 +258,16 @@ The script queries GitHub using `GH_TOKEN` and verifies that:
   metadata;
 - the installation token can list the expected repository and is restricted to the
   target repository owner;
-- the token resolves the expected repository with push permission; and
+- the token resolves the expected repository; and
 - the publisher identity is the corresponding `<app-slug>[bot]` account.
 
 On success it emits `publisher_login` and the GitHub-generated noreply
-`publisher_email`. Any identity, installation, ownership, permission or API mismatch
-fails before repository mutation. This script verifies a token supplied by the
-workflow; it does not create or store the GitHub App token.
+`publisher_email`. Any identity, installation, ownership or API mismatch fails before
+repository mutation. The pinned token-minting action separately requests
+`contents: write` and rejects installations that do not grant it. The subsequent Git
+and Contents API calls prove write access without relying on the repository response's
+collaborator-style `permissions.push` field. This script verifies a token supplied by
+the workflow; it does not create or store the GitHub App token.
 
 ### `codex-jira-publish.sh`
 
