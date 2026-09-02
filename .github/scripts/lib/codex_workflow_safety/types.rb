@@ -65,7 +65,7 @@ TRUSTED_REVIEW_REFERENCE = %r{\Ahmcts/codex-agent-workflows/\.github/workflows/c
 SECRET_EXPRESSION = /\$\{\{.*?\bsecrets\b.*?\}\}/im.freeze
 GITHUB_EXPRESSION = /\$\{\{/.freeze
 GLOB_MAGIC = /[*?\[\]{}+@]/.freeze
-LOCAL_WORKFLOW = %r{\A\./\.github/workflows/([^/]+\.ya?ml)\z}.freeze
+LOCAL_WORKFLOW = %r{\A(?:\$|\.)/\.github/workflows/([^/]+\.ya?ml)\z}.freeze
 STATIC_VAR_EXPRESSION = /\A\$\{\{\s*vars\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}\z/.freeze
 APPROVED_SONAR_URL = "https://sonarcloud.io"
 

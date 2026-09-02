@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import unittest
 from pathlib import Path
 
@@ -39,7 +38,7 @@ def workflow_job(workflow: Path, job_name: str) -> str:
 
 class WorkflowContractTests(unittest.TestCase):
     def test_internal_reusable_workflows_use_same_release_components(self):
-        pattern = re.compile(r"uses: \./(\.github/workflows/[^\s]+)")
+        pattern = re.compile(r"uses: \$/(\.github/workflows/[^\s]+)")
         external_pattern = re.compile(
             r"uses: hmcts/codex-agent-workflows/\.github/workflows/[^@\s]+@"
         )
@@ -58,51 +57,40 @@ class WorkflowContractTests(unittest.TestCase):
                 f"same-release workflow component is missing: {path}",
             )
 
-    def test_immutable_runtime_pin_packages_policy_preparer(self):
-        pins = set()
-        pattern = re.compile(
-            r"hmcts/codex-agent-workflows/\.github/actions/runtime@([0-9a-f]{40})"
+    def test_runtime_uses_same_release_self_reference(self):
+        pattern = re.compile(r"uses: \$/\.github/actions/runtime(?:@[^\s]+)?")
+        legacy_pattern = re.compile(
+            r"uses: hmcts/codex-agent-workflows/\.github/actions/runtime@"
         )
+        references = []
         for workflow in COMPONENT_WORKFLOWS:
-            pins.update(pattern.findall(workflow.read_text(encoding="utf-8")))
+            content = workflow.read_text(encoding="utf-8")
+            self.assertIsNone(
+                legacy_pattern.search(content),
+                f"{workflow.name} must load the runtime from its own release",
+            )
+            references.extend(pattern.findall(content))
 
-        self.assertEqual(len(pins), 1)
-        pin = pins.pop()
+        self.assertTrue(references)
+        runtime_root = ROOT / "actions" / "runtime"
+        self.assertTrue((runtime_root / "action.yml").is_file())
         for path in (
             ".github/scripts/check-codex-pr-safety.rb",
             ".github/scripts/codex-prepare-policy-candidate.sh",
             ".github/scripts/codex-recover-pr-state.py",
             ".github/scripts/codex-review-feedback-data.py",
         ):
-            completed = subprocess.run(
-                ["git", "cat-file", "-e", f"{pin}:{path}"],
-                cwd=ROOT.parent,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(
-                completed.returncode,
-                0,
-                f"immutable runtime {pin} does not package {path}: {completed.stderr}",
-            )
+            self.assertTrue((ROOT.parent / path).is_file(), f"runtime does not package {path}")
 
-        recovery_helper = subprocess.run(
-            [
-                "git",
-                "show",
-                f"{pin}:.github/scripts/codex-recover-pr-state.py",
-            ],
-            cwd=ROOT.parent,
-            capture_output=True,
-            text=True,
+        recovery_helper = (ROOT.parent / ".github/scripts/codex-recover-pr-state.py").read_text(
+            encoding="utf-8"
         )
-        self.assertEqual(recovery_helper.returncode, 0, recovery_helper.stderr)
         self.assertIn(
             'parser.add_argument("--base-sha", required=True)',
-            recovery_helper.stdout,
+            recovery_helper,
         )
-        self.assertIn("recover_fresh_pull_request", recovery_helper.stdout)
-        self.assertIn("fetch_pull_request_by_number", recovery_helper.stdout)
+        self.assertIn("recover_fresh_pull_request", recovery_helper)
+        self.assertIn("fetch_pull_request_by_number", recovery_helper)
 
     def test_both_reusable_workflows_require_jira_callback_secret(self):
         for workflow in (IMPLEMENT_WORKFLOW, REVIEW_WORKFLOW):

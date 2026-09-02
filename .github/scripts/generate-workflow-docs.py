@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[2]
 WORKFLOW_DIR = ROOT / ".github" / "workflows"
 OUTPUT = ROOT / "docs" / "workflow-architecture.md"
 JOB_PATTERN = re.compile(r"(?m)^  ([A-Za-z0-9_-]+):\s*$")
-CALL_PATTERN = re.compile(r"uses: \./\.github/workflows/([^\s]+)")
+CALL_PATTERN = re.compile(r"uses: \$/\.github/workflows/([^\s]+)")
 
 
 def workflow_inventory() -> str:
