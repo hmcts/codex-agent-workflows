@@ -94,7 +94,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Download credential-free verification source
         id: source
@@ -205,7 +205,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted publisher
         uses: actions/checkout@v7
@@ -374,7 +374,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout default branch
         uses: actions/checkout@v7
@@ -511,7 +511,7 @@ jobs:
     permissions: {}
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Fail after repair attempts
         run: |
@@ -536,7 +536,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Notify Jira that no patch could be published
         continue-on-error: true

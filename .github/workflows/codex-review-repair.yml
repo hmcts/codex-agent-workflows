@@ -93,7 +93,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted verifier tools
         uses: actions/checkout@v7
@@ -178,7 +178,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted repair tooling
         uses: actions/checkout@v7
@@ -243,7 +243,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted collector
         uses: actions/checkout@v7
@@ -305,7 +305,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Download credential-free published review source
         uses: actions/download-artifact@v8
@@ -402,7 +402,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout current default branch
         uses: actions/checkout@v7
@@ -519,7 +519,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted status scripts
         uses: actions/checkout@v7
@@ -582,7 +582,7 @@ jobs:
       CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Create GitHub App installation token
         id: app-token

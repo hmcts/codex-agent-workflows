@@ -80,7 +80,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout planned repository revision
         uses: actions/checkout@v7
@@ -128,7 +128,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout planned repository revision
         uses: actions/checkout@v7
@@ -199,7 +199,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted collector
         uses: actions/checkout@v7
@@ -261,7 +261,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Notify Jira that implementation generation failed
         continue-on-error: true
@@ -290,7 +290,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Notify Jira that no repository changes are required
         run: |

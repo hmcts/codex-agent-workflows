@@ -60,7 +60,7 @@ jobs:
 
     steps:
       - name: Locate trusted Codex runtime
-        uses: $/.github/actions/runtime
+        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Create GitHub App installation token
         id: app-token
