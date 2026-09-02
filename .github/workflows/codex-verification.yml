@@ -70,7 +70,7 @@ on:
 jobs:
   initial:
     permissions: {}
-    uses: $/.github/workflows/codex-verify-initial.yml
+    uses: ./.github/workflows/codex-verify-initial.yml
     with:
       node_version: ${{ inputs.node_version }}
       has_changes: ${{ inputs.has_changes }}
@@ -82,7 +82,7 @@ jobs:
     if: inputs.has_changes == 'true' && needs.initial.outputs.passed != 'true'
     permissions:
       contents: read
-    uses: $/.github/workflows/codex-repair-round.yml
+    uses: ./.github/workflows/codex-repair-round.yml
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
@@ -110,7 +110,7 @@ jobs:
     if: needs.repair-1.outputs.has_changes == 'true' && needs.repair-1.outputs.passed != 'true'
     permissions:
       contents: read
-    uses: $/.github/workflows/codex-repair-round.yml
+    uses: ./.github/workflows/codex-repair-round.yml
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
@@ -138,7 +138,7 @@ jobs:
     if: needs.repair-2.outputs.has_changes == 'true' && needs.repair-2.outputs.passed != 'true'
     permissions:
       contents: read
-    uses: $/.github/workflows/codex-repair-round.yml
+    uses: ./.github/workflows/codex-repair-round.yml
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}

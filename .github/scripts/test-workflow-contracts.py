@@ -38,7 +38,7 @@ def workflow_job(workflow: Path, job_name: str) -> str:
 
 class WorkflowContractTests(unittest.TestCase):
     def test_internal_reusable_workflows_use_same_release_components(self):
-        pattern = re.compile(r"uses: \$/(\.github/workflows/[^\s]+)")
+        pattern = re.compile(r"uses: \./(\.github/workflows/[^\s]+)")
         external_pattern = re.compile(
             r"uses: hmcts/codex-agent-workflows/\.github/workflows/[^@\s]+@"
         )
