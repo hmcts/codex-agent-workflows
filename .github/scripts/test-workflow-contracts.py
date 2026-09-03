@@ -459,6 +459,17 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertIn("failure_class:", verification)
 
+    def test_planning_and_implementation_models_are_pinned(self):
+        planner = workflow_job(PLAN_WORKFLOW, "codex-plan-action")
+        implementation = workflow_job(GENERATE_WORKFLOW, "codex-generate-action")
+        repair = workflow_job(REPAIR_ROUND_WORKFLOW, "repair-action")
+
+        self.assertIn("model: gpt-5.6-sol", planner)
+        self.assertIn("effort: ultra", planner)
+        for job in (implementation, repair):
+            self.assertIn("model: gpt-5.6-sol", job)
+            self.assertIn("effort: medium", job)
+
     def test_review_setup_failure_returns_existing_pr_to_draft(self):
         content = REVIEW_GENERATE_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
