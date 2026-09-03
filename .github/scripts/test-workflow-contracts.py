@@ -66,6 +66,22 @@ class WorkflowContractTests(unittest.TestCase):
                 f"same-release workflow component is missing: {path}",
             )
 
+    def test_external_actions_and_workflows_use_immutable_commit_pins(self):
+        pattern = re.compile(r"(?m)^\s*uses:\s+([^#\s]+)")
+        immutable_reference = re.compile(
+            r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[^@\s]+)?@[0-9a-f]{40}$"
+        )
+
+        for workflow in WORKFLOW_ROOT.glob("*.yml"):
+            for reference in pattern.findall(workflow.read_text(encoding="utf-8")):
+                if reference.startswith(("./", "$/", "docker://")):
+                    continue
+                self.assertRegex(
+                    reference,
+                    immutable_reference,
+                    f"{workflow.name} uses mutable external reference: {reference}",
+                )
+
     def test_immutable_runtime_pin_is_released_and_packages_policy_preparer(self):
         pins = set()
         pattern = re.compile(

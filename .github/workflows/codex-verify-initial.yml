@@ -57,7 +57,7 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Download credential-free verification source
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ inputs.source_artifact }}
           path: ${{ runner.temp }}/codex-verification-source
@@ -66,13 +66,13 @@ jobs:
         run: tar -xzf "$RUNNER_TEMP/codex-verification-source/codex-verification-source.tar.gz" -C "$GITHUB_WORKSPACE"
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: 21
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ inputs.node_version }}
 
@@ -80,7 +80,7 @@ jobs:
         run: corepack enable
 
       - name: Download Codex output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -142,7 +142,7 @@ jobs:
 
       - name: Upload verified Codex output
         if: steps.verify.outputs.passed == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
           path: |
@@ -154,7 +154,7 @@ jobs:
 
       - name: Upload unverified Codex output for draft publication
         if: steps.verify.outputs.passed != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.CODEX_DRAFT_ARTIFACT }}
           path: |
@@ -166,7 +166,7 @@ jobs:
 
       - name: Upload verification failure
         if: steps.verify.outputs.passed != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.CODEX_FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-verification-failure

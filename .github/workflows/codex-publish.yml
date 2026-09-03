@@ -99,7 +99,7 @@ jobs:
       - name: Download credential-free verification source
         id: source
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ inputs.source_artifact }}
           path: ${{ runner.temp }}/codex-verification-source
@@ -113,7 +113,7 @@ jobs:
         id: output
         if: steps.restore.outcome == 'success'
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -129,7 +129,7 @@ jobs:
       - name: Upload structurally valid output for draft publication
         id: draft
         if: steps.structure.outcome == 'success'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: codex-jira-terminal-draft
           path: |
@@ -168,7 +168,7 @@ jobs:
 
       - name: Upload terminal verification evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: codex-jira-terminal-verification-failure
           path: ${{ runner.temp }}/codex-terminal-verification-failure
@@ -208,14 +208,14 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted publisher
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout candidate policy base
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
           fetch-depth: 0
@@ -223,7 +223,7 @@ jobs:
           path: codex-policy-candidate
 
       - name: Download latest Codex output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -263,13 +263,13 @@ jobs:
         run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
 
       - name: Download unverified publication metadata
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_DRAFT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-unverified
 
       - name: Download verification failure
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-failure
@@ -377,14 +377,14 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout default branch
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout candidate policy base
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
           fetch-depth: 0
@@ -392,7 +392,7 @@ jobs:
           path: codex-policy-candidate
 
       - name: Download Codex output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -438,7 +438,7 @@ jobs:
           echo "verified_artifact=${CODEX_VERIFIED_ARTIFACT}" >>"$GITHUB_OUTPUT"
 
       - name: Download verified Codex output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
           path: ${{ runner.temp }}/codex-verified

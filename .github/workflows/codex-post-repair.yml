@@ -133,7 +133,7 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout default branch
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           fetch-depth: 0
@@ -143,13 +143,13 @@ jobs:
         run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-runner-preflight.sh
 
       - name: Download Codex output to repair
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_INPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-input
 
       - name: Download PR verification failure
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-failure
@@ -211,13 +211,13 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted collector
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           persist-credentials: false
 
       - name: Download Codex output being repaired
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_INPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-input
@@ -242,7 +242,7 @@ jobs:
         run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-collect.sh
 
       - name: Upload repaired Codex output
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -280,7 +280,7 @@ jobs:
           echo "failure_artifact=${CODEX_FAILURE_ARTIFACT}" >>"$GITHUB_OUTPUT"
 
       - name: Download credential-free verification source
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ inputs.source_artifact }}
           path: ${{ runner.temp }}/codex-verification-source
@@ -289,13 +289,13 @@ jobs:
         run: tar -xzf "$RUNNER_TEMP/codex-verification-source/codex-verification-source.tar.gz" -C "$GITHUB_WORKSPACE"
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: 21
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ inputs.node_version }}
 
@@ -303,7 +303,7 @@ jobs:
         run: corepack enable
 
       - name: Download repaired Codex output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -329,7 +329,7 @@ jobs:
 
       - name: Upload verified repaired Codex output
         if: steps.verify.outputs.passed == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
           path: |
@@ -341,7 +341,7 @@ jobs:
 
       - name: Upload repaired verification failure
         if: steps.verify.outputs.passed != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.CODEX_FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-pr-repair-verification-failure
@@ -382,14 +382,14 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout default branch
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout candidate policy base
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
           fetch-depth: 0
@@ -397,7 +397,7 @@ jobs:
           path: codex-policy-candidate
 
       - name: Download repaired Codex output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -443,7 +443,7 @@ jobs:
           echo "verified_artifact=${CODEX_VERIFIED_ARTIFACT}" >>"$GITHUB_OUTPUT"
 
       - name: Download verified repaired Codex output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
           path: ${{ runner.temp }}/codex-verified
@@ -517,7 +517,7 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Download credential-free verification source
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ inputs.source_artifact }}
           path: ${{ runner.temp }}/codex-verification-source
@@ -526,13 +526,13 @@ jobs:
         run: tar -xzf "$RUNNER_TEMP/codex-verification-source/codex-verification-source.tar.gz" -C "$GITHUB_WORKSPACE"
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: 21
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ inputs.node_version }}
 
@@ -540,7 +540,7 @@ jobs:
         run: corepack enable
 
       - name: Download repaired Codex output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -566,7 +566,7 @@ jobs:
 
       - name: Upload repaired PR patch verification failure
         if: steps.verify.outputs.passed != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.CODEX_FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-repaired-pr-verification-failure
@@ -599,7 +599,7 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted status scripts
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           persist-credentials: false
@@ -641,7 +641,7 @@ jobs:
         if: >-
           steps.verify.outputs.passed != 'true' &&
           needs.verify-published-pr-1-patch.outputs.passed == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.STATUS_FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-repaired-pr-status-failure
@@ -698,7 +698,7 @@ jobs:
 
       - name: Download final verification failure
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-terminal-failure

@@ -96,14 +96,14 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted verifier tools
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           path: trusted
           persist-credentials: false
 
       - name: Checkout exact published PR revision
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.published_commit_sha }}
           fetch-depth: 0
@@ -139,7 +139,7 @@ jobs:
           echo "base_sha=${BASE_SHA}" >>"$GITHUB_OUTPUT"
 
       - name: Upload credential-free published review source
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: codex-review-published-source
           path: |
@@ -181,7 +181,7 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted repair tooling
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           fetch-depth: 0
@@ -191,13 +191,13 @@ jobs:
         run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-runner-preflight.sh
 
       - name: Download published Codex review output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_INPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-input
 
       - name: Download external status failure
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-failure
@@ -246,13 +246,13 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted collector
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           persist-credentials: false
 
       - name: Download published Codex review output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_INPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-input
@@ -274,7 +274,7 @@ jobs:
         run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-repair-collect.sh
 
       - name: Upload external-status repair output
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -308,7 +308,7 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Download credential-free published review source
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ needs.prepare-published-review-repair-source.outputs.artifact }}
           path: ${{ runner.temp }}/codex-review-verification-source
@@ -317,13 +317,13 @@ jobs:
         run: tar -xzf "$RUNNER_TEMP/codex-review-verification-source/codex-review-published-source.tar.gz" -C "$GITHUB_WORKSPACE"
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: 21
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ inputs.node_version }}
 
@@ -331,7 +331,7 @@ jobs:
         run: corepack enable
 
       - name: Download external-status repair output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -360,7 +360,7 @@ jobs:
 
       - name: Upload verified external-status repair
         if: steps.verify.outputs.passed == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
           path: |
@@ -373,7 +373,7 @@ jobs:
 
       - name: Upload external-status repair verification failure
         if: steps.verify.outputs.passed != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.CODEX_FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-review-external-repair-verification-failure
@@ -405,7 +405,7 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout current default branch
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.DEFAULT_BRANCH }}
           fetch-depth: 0
@@ -426,7 +426,7 @@ jobs:
           echo "sha=${current_sha}" >>"$GITHUB_OUTPUT"
 
       - name: Checkout candidate policy base
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
           fetch-depth: 0
@@ -434,7 +434,7 @@ jobs:
           path: codex-policy-candidate
 
       - name: Download external-status repair output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
@@ -479,7 +479,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/codex-pr-review-publish.sh"
 
       - name: Download verified external-status repair
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
           path: ${{ runner.temp }}/codex-verified
@@ -522,7 +522,7 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted status scripts
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           persist-credentials: false
@@ -549,7 +549,7 @@ jobs:
 
       - name: Upload repaired external status failure
         if: steps.verify.outputs.passed != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.STATUS_FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-review-repaired-status-failure
@@ -606,7 +606,7 @@ jobs:
 
       - name: Download final verification failure
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ env.FAILURE_ARTIFACT }}
           path: ${{ runner.temp }}/codex-review-terminal-failure
