@@ -537,6 +537,12 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn("-eq 137", content, workflow)
             self.assertIn("failure_class=environment", content, workflow)
 
+    def test_explicit_chrome_preflight_failure_uses_infrastructure_retry(self):
+        for workflow in (VERIFY_INITIAL_WORKFLOW, REPAIR_ROUND_WORKFLOW):
+            content = workflow.read_text(encoding="utf-8")
+            self.assertIn("Chrome preflight failed with exit code", content, workflow)
+            self.assertIn("failure_class=environment", content, workflow)
+
     def test_planning_and_implementation_models_are_pinned(self):
         planner = workflow_job(PLAN_WORKFLOW, "codex-plan-action")
         implementation = workflow_job(GENERATE_WORKFLOW, "codex-generate-action")

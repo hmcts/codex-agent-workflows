@@ -292,6 +292,9 @@ jobs:
         run: |
           is_transient_browser_failure() {
             local log="$1"
+            if grep -Fq "Chrome preflight failed with exit code" "$log"; then
+              return 0
+            fi
             grep -Fq "Failed to launch the browser process" "$log" &&
               grep -Fq "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq" "$log" &&
               grep -Fq "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq" "$log"
