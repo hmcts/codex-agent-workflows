@@ -77,6 +77,8 @@ on:
         value: ${{ jobs.verify-repair.outputs.draft_artifact }}
       failure_artifact:
         value: ${{ jobs.verify-repair.outputs.failure_artifact }}
+      failure_class:
+        value: ${{ jobs.verify-repair.outputs.failure_class }}
     secrets:
       CODEX_OPENAI_API_KEY:
         required: true
@@ -236,6 +238,7 @@ jobs:
       verified_artifact: codex-jira-verified-${{ inputs.attempt }}
       draft_artifact: codex-jira-unverified-${{ inputs.attempt }}
       failure_artifact: codex-jira-verification-failure-${{ inputs.attempt }}
+      failure_class: ${{ steps.verify.outputs.failure_class || 'implementation' }}
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       EXPECTED_BRANCH_NAME: ${{ inputs.branch_name }}
@@ -283,17 +286,53 @@ jobs:
         env:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
         run: |
+          is_transient_browser_failure() {
+            local log="$1"
+            grep -Fq "Failed to launch the browser process" "$log" &&
+              grep -Fq "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq" "$log" &&
+              grep -Fq "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq" "$log"
+          }
+
+          cp -a "$OUTPUT_DIR" "$RUNNER_TEMP/codex-output-before-verification"
           set +e
-          ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-verify.sh >"$RUNNER_TEMP/codex-verification.log" 2>&1
+          ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-verify.sh >"$RUNNER_TEMP/codex-verification-attempt-1.log" 2>&1
           status=$?
-          cat "$RUNNER_TEMP/codex-verification.log"
+          set -e
+          cat "$RUNNER_TEMP/codex-verification-attempt-1.log"
+
+          failure_class=implementation
+          if [[ "${status}" -ne 0 ]] && is_transient_browser_failure "$RUNNER_TEMP/codex-verification-attempt-1.log"; then
+            echo "::warning::Retrying verification once after a recognised transient Chrome/Puppeteer launch failure."
+            cd "$RUNNER_TEMP"
+            find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+            tar -xzf "$RUNNER_TEMP/codex-verification-source/codex-verification-source.tar.gz" -C "$GITHUB_WORKSPACE"
+            rm -rf "$RUNNER_TEMP/codex-jira-verify-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$OUTPUT_DIR"
+            cp -a "$RUNNER_TEMP/codex-output-before-verification" "$OUTPUT_DIR"
+            cd "$GITHUB_WORKSPACE"
+            set +e
+            ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-verify.sh >"$RUNNER_TEMP/codex-verification-attempt-2.log" 2>&1
+            status=$?
+            set -e
+            cat "$RUNNER_TEMP/codex-verification-attempt-2.log"
+            if [[ "${status}" -ne 0 ]] && is_transient_browser_failure "$RUNNER_TEMP/codex-verification-attempt-2.log"; then
+              failure_class=environment
+            fi
+          fi
+
+          final_log="$RUNNER_TEMP/codex-verification-attempt-1.log"
+          if [[ -f "$RUNNER_TEMP/codex-verification-attempt-2.log" ]]; then
+            final_log="$RUNNER_TEMP/codex-verification-attempt-2.log"
+          fi
           if [[ "${status}" -eq 0 ]]; then
             echo "passed=true" >>"$GITHUB_OUTPUT"
+            echo "failure_class=none" >>"$GITHUB_OUTPUT"
           else
             mkdir -p "$RUNNER_TEMP/codex-verification-failure"
-            cp "$RUNNER_TEMP/codex-verification.log" "$RUNNER_TEMP/codex-verification-failure/verification-failure.log"
-            tail -n 240 "$RUNNER_TEMP/codex-verification.log" >"$RUNNER_TEMP/codex-verification-failure/verification-failure-summary.log"
+            cp "$RUNNER_TEMP"/codex-verification-attempt-*.log "$RUNNER_TEMP/codex-verification-failure/"
+            cp "$final_log" "$RUNNER_TEMP/codex-verification-failure/verification-failure.log"
+            tail -n 240 "$final_log" >"$RUNNER_TEMP/codex-verification-failure/verification-failure-summary.log"
             echo "passed=false" >>"$GITHUB_OUTPUT"
+            echo "failure_class=${failure_class}" >>"$GITHUB_OUTPUT"
           fi
           exit 0
 

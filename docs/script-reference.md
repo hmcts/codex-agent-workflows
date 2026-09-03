@@ -204,8 +204,11 @@ trusted pipeline wrapper is hash-checked immediately before execution.
 
 Successful verification creates `verification.env` containing the branch name,
 base SHA, patch SHA and guardrail-review flag. It also emits the branch and patch hash
-as step outputs. A missing trusted file, changed hash, unsafe workflow, patch mismatch
-or failed caller check stops verification and prevents normal ready-PR publication.
+as step outputs. A missing trusted file, changed hash, unsafe workflow or patch
+mismatch stops verification and prevents normal ready-PR publication. The workflow
+retries the recognised transient Chrome/Puppeteer runner failure once. A persistent
+match is treated as an environment failure, which prevents model repair calls and
+publishes a draft with the failure evidence.
 
 ### `check-codex-pr-safety.rb`
 

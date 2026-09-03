@@ -15,6 +15,7 @@ PLAN_WORKFLOW = WORKFLOW_ROOT / "codex-plan.yml"
 GENERATE_WORKFLOW = WORKFLOW_ROOT / "codex-generate.yml"
 VERIFY_INITIAL_WORKFLOW = WORKFLOW_ROOT / "codex-verify-initial.yml"
 REPAIR_ROUND_WORKFLOW = WORKFLOW_ROOT / "codex-repair-round.yml"
+VERIFICATION_WORKFLOW = WORKFLOW_ROOT / "codex-verification.yml"
 PUBLISH_WORKFLOW = WORKFLOW_ROOT / "codex-publish.yml"
 POST_REPAIR_WORKFLOW = WORKFLOW_ROOT / "codex-post-repair.yml"
 REVIEW_WORKFLOW = WORKFLOW_ROOT / "codex-review-feedback.yml"
@@ -437,6 +438,26 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("available=false", job)
         self.assertIn("codex-jira-terminal-draft", job)
         self.assertIn("  codex-prepublication-terminal-failed:", content)
+
+    def test_transient_browser_failure_retries_without_model_repair(self):
+        for workflow in (VERIFY_INITIAL_WORKFLOW, REPAIR_ROUND_WORKFLOW):
+            content = workflow.read_text(encoding="utf-8")
+            self.assertIn("is_transient_browser_failure()", content)
+            self.assertIn("codex-verification-attempt-2.log", content)
+            self.assertIn(
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", content
+            )
+            self.assertIn(
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", content
+            )
+            self.assertIn("failure_class=environment", content)
+            self.assertIn("failure_class=implementation", content)
+
+        verification = VERIFICATION_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(
+            verification.count("outputs.failure_class != 'environment'"), 3
+        )
+        self.assertIn("failure_class:", verification)
 
     def test_review_setup_failure_returns_existing_pr_to_draft(self):
         content = REVIEW_GENERATE_WORKFLOW.read_text(encoding="utf-8")
