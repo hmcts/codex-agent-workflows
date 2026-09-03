@@ -526,6 +526,14 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertIn("inputs.initial_failure_class == 'implementation'", review_source)
 
+        for workflow in (POST_REPAIR_WORKFLOW, REVIEW_REPAIR_WORKFLOW):
+            content = workflow.read_text(encoding="utf-8")
+            self.assertIn(
+                "Credential-free verification was blocked by runner infrastructure",
+                content,
+                workflow,
+            )
+
     def test_command_timeouts_are_classified_as_environment_failures(self):
         for workflow in (
             VERIFY_INITIAL_WORKFLOW,

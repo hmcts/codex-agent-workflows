@@ -677,7 +677,7 @@ jobs:
       PR_NUMBER: ${{ needs.publish-published-pr-repair-1.outputs.pr_number || inputs.pr_number }}
       EXPECTED_HEAD_SHA: ${{ needs.publish-published-pr-repair-1.outputs.commit_sha || inputs.commit_sha }}
       FAILURE_ARTIFACT: ${{ needs.verify-published-pr-1.outputs.failure_artifact || inputs.initial_failure_artifact }}
-      FAILURE_MESSAGE: ${{ inputs.initial_failure_class == 'no-build' && 'Required Jenkins status reported that this commit cannot be built; no automated repair was attempted.' || 'Required Jenkins, Sonar, or credential-free verification failed after the available automated repair attempt.' }}
+      FAILURE_MESSAGE: ${{ inputs.initial_failure_class == 'no-build' && 'Required Jenkins status reported that this commit cannot be built; no automated repair was attempted.' || inputs.initial_failure_class == 'environment' && 'Credential-free verification was blocked by runner infrastructure; no automated repair was attempted.' || 'Required Jenkins, Sonar, or credential-free verification failed after the available automated repair attempt.' }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
       CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
     steps:
