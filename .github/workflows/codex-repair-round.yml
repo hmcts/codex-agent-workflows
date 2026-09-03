@@ -32,6 +32,10 @@ on:
         required: false
         default: "22"
         type: string
+      java_version:
+        required: false
+        default: "21"
+        type: string
       jira_notify_timeout_seconds:
         required: false
         default: "10"
@@ -265,7 +269,7 @@ jobs:
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ inputs.java_version }}
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -301,7 +305,9 @@ jobs:
           cat "$RUNNER_TEMP/codex-verification-attempt-1.log"
 
           failure_class=implementation
-          if [[ "${status}" -ne 0 ]] && is_transient_browser_failure "$RUNNER_TEMP/codex-verification-attempt-1.log"; then
+          if [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
+            failure_class=environment
+          elif [[ "${status}" -ne 0 ]] && is_transient_browser_failure "$RUNNER_TEMP/codex-verification-attempt-1.log"; then
             echo "::warning::Retrying verification once after a recognised transient Chrome/Puppeteer launch failure."
             cd "$RUNNER_TEMP"
             find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +

@@ -7,6 +7,10 @@ on:
         required: false
         default: "22"
         type: string
+      java_version:
+        required: false
+        default: "21"
+        type: string
       sonar_host_url:
         required: true
         type: string
@@ -47,6 +51,8 @@ on:
         value: ${{ jobs.verify-published-pr.outputs.output_artifact }}
       failure_artifact:
         value: ${{ jobs.verify-published-pr.outputs.failure_artifact }}
+      failure_class:
+        value: ${{ jobs.verify-published-pr.outputs.failure_class }}
     secrets:
       CODEX_SONAR_TOKEN:
         required: false
@@ -61,6 +67,7 @@ jobs:
       passed: ${{ steps.verify.outputs.passed || 'false' }}
       output_artifact: ${{ steps.selected-artifacts.outputs.output_artifact }}
       failure_artifact: ${{ steps.selected-artifacts.outputs.failure_artifact }}
+      failure_class: ${{ steps.verify.outputs.failure_class || 'implementation' }}
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       EXPECTED_BRANCH_NAME: ${{ inputs.branch_name }}
@@ -91,7 +98,7 @@ jobs:
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ inputs.java_version }}
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -118,11 +125,17 @@ jobs:
           cat "$RUNNER_TEMP/codex-pr-verification.log"
           if [[ "$status" -eq 0 ]]; then
             echo "passed=true" >>"$GITHUB_OUTPUT"
+            echo "failure_class=none" >>"$GITHUB_OUTPUT"
           else
             mkdir -p "$RUNNER_TEMP/codex-pr-verification-failure"
             cp "$RUNNER_TEMP/codex-pr-verification.log" "$RUNNER_TEMP/codex-pr-verification-failure/verification-failure.log"
             tail -n 240 "$RUNNER_TEMP/codex-pr-verification.log" >"$RUNNER_TEMP/codex-pr-verification-failure/verification-failure-summary.log"
             echo "passed=false" >>"$GITHUB_OUTPUT"
+            if [[ "$status" -eq 124 || "$status" -eq 137 ]]; then
+              echo "failure_class=environment" >>"$GITHUB_OUTPUT"
+            else
+              echo "failure_class=implementation" >>"$GITHUB_OUTPUT"
+            fi
           fi
           exit 0
 
@@ -146,6 +159,7 @@ jobs:
       passed: ${{ steps.verify.outputs.passed || 'false' }}
       output_artifact: ${{ needs.verify-published-pr-patch.outputs.output_artifact }}
       failure_artifact: ${{ steps.verify.outputs.failure_artifact }}
+      failure_class: ${{ steps.verify.outputs.failure_class || 'implementation' }}
     env:
       GH_TOKEN: ${{ github.token }}
       SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}
@@ -175,10 +189,11 @@ jobs:
           if [[ "$LOCAL_VERIFICATION_PASSED" != "true" ]]; then
             echo "passed=false" >>"$GITHUB_OUTPUT"
             echo "failure_artifact=$LOCAL_FAILURE_ARTIFACT" >>"$GITHUB_OUTPUT"
+            echo "failure_class=${{ needs.verify-published-pr-patch.outputs.failure_class }}" >>"$GITHUB_OUTPUT"
             exit 0
           fi
           set +e
-          {
+          (
             ${CODEX_RUNTIME_PATH}/.github/scripts/codex-wait-pr-status.sh
             status=$?
             if [[ "$status" -eq 0 ]]; then
@@ -186,17 +201,23 @@ jobs:
               status=$?
             fi
             exit "$status"
-          } >"$RUNNER_TEMP/codex-pr-status.log" 2>&1
+          ) >"$RUNNER_TEMP/codex-pr-status.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/codex-pr-status.log"
           echo "failure_artifact=$STATUS_FAILURE_ARTIFACT" >>"$GITHUB_OUTPUT"
           if [[ "$status" -eq 0 ]]; then
             echo "passed=true" >>"$GITHUB_OUTPUT"
+            echo "failure_class=none" >>"$GITHUB_OUTPUT"
           else
             mkdir -p "$RUNNER_TEMP/codex-pr-status-failure"
             cp "$RUNNER_TEMP/codex-pr-status.log" "$RUNNER_TEMP/codex-pr-status-failure/verification-failure.log"
             tail -n 240 "$RUNNER_TEMP/codex-pr-status.log" >"$RUNNER_TEMP/codex-pr-status-failure/verification-failure-summary.log"
             echo "passed=false" >>"$GITHUB_OUTPUT"
+            if [[ "$status" -eq 2 ]]; then
+              echo "failure_class=no-build" >>"$GITHUB_OUTPUT"
+            else
+              echo "failure_class=implementation" >>"$GITHUB_OUTPUT"
+            fi
           fi
           exit 0
       - name: Upload external status failure

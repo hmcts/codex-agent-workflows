@@ -41,6 +41,11 @@ on:
         required: false
         default: "22"
         type: string
+      java_version:
+        description: Java version provisioned for credential-free verification
+        required: false
+        default: "21"
+        type: string
       github_app_client_id:
         description: Client ID of the HMCTS-owned Codex GitHub App
         required: true
@@ -145,6 +150,7 @@ jobs:
       initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
+      java_version: ${{ inputs.java_version }}
       branch_name: ${{ needs.generate.outputs.branch_name }}
       has_changes: ${{ needs.generate.outputs.has_changes }}
       trusted_sha: ${{ needs.generate.outputs.trusted_sha }}
@@ -189,6 +195,7 @@ jobs:
     uses: $/.github/workflows/codex-post-verify.yml
     with:
       node_version: ${{ inputs.node_version }}
+      java_version: ${{ inputs.java_version }}
       sonar_host_url: ${{ inputs.sonar_host_url }}
       sonar_project_key: ${{ inputs.sonar_project_key }}
       required_status_context: ${{ inputs.required_status_context }}
@@ -219,6 +226,7 @@ jobs:
       initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
+      java_version: ${{ inputs.java_version }}
       github_app_client_id: ${{ inputs.github_app_client_id }}
       sonar_host_url: ${{ inputs.sonar_host_url }}
       sonar_project_key: ${{ inputs.sonar_project_key }}
@@ -237,6 +245,7 @@ jobs:
       pr_url: ${{ needs.publish.outputs.pr_url }}
       output_artifact: ${{ needs.publish.outputs.output_artifact }}
       initial_passed: ${{ needs.verify-published-pr.outputs.passed }}
+      initial_failure_class: ${{ needs.verify-published-pr.outputs.failure_class }}
       initial_failure_artifact: ${{ needs.verify-published-pr.outputs.failure_artifact }}
     secrets:
       CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}

@@ -55,6 +55,8 @@ on:
         value: ${{ jobs.verify-review-status.outputs.passed }}
       failure_artifact:
         value: ${{ jobs.verify-review-status.outputs.failure_artifact }}
+      failure_class:
+        value: ${{ jobs.verify-review-status.outputs.failure_class }}
     secrets:
       CODEX_GITHUB_APP_PRIVATE_KEY:
         required: true
@@ -204,6 +206,7 @@ jobs:
     outputs:
       passed: ${{ steps.verify.outputs.passed || 'false' }}
       failure_artifact: codex-review-external-status-failure
+      failure_class: ${{ steps.verify.outputs.failure_class || 'implementation' }}
     env:
       GH_TOKEN: ${{ github.token }}
       SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}
@@ -236,11 +239,17 @@ jobs:
           cat "$RUNNER_TEMP/codex-review-external-status.log"
           if [[ "${status}" -eq 0 ]]; then
             echo "passed=true" >>"$GITHUB_OUTPUT"
+            echo "failure_class=none" >>"$GITHUB_OUTPUT"
           else
             mkdir -p "$RUNNER_TEMP/codex-review-external-status-failure"
             cp "$RUNNER_TEMP/codex-review-external-status.log" "$RUNNER_TEMP/codex-review-external-status-failure/verification-failure.log"
             tail -n 240 "$RUNNER_TEMP/codex-review-external-status.log" >"$RUNNER_TEMP/codex-review-external-status-failure/verification-failure-summary.log"
             echo "passed=false" >>"$GITHUB_OUTPUT"
+            if [[ "${status}" -eq 2 ]]; then
+              echo "failure_class=no-build" >>"$GITHUB_OUTPUT"
+            else
+              echo "failure_class=implementation" >>"$GITHUB_OUTPUT"
+            fi
           fi
           exit 0
 

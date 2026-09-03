@@ -12,6 +12,11 @@ on:
         required: false
         default: "22"
         type: string
+      java_version:
+        description: Java version provisioned for credential-free verification
+        required: false
+        default: "21"
+        type: string
       github_app_client_id:
         description: Client ID of the HMCTS-owned Codex GitHub App
         required: true
@@ -78,6 +83,7 @@ jobs:
     with:
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
+      java_version: ${{ inputs.java_version }}
       is_codex_pr: ${{ needs.intake.outputs.is_codex_pr }}
       pr_number: ${{ needs.intake.outputs.pr_number }}
       head_ref: ${{ needs.intake.outputs.head_ref }}
@@ -117,6 +123,7 @@ jobs:
     with:
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
+      java_version: ${{ inputs.java_version }}
       github_app_client_id: ${{ inputs.github_app_client_id }}
       sonar_host_url: ${{ inputs.sonar_host_url }}
       sonar_project_key: ${{ inputs.sonar_project_key }}
@@ -133,6 +140,7 @@ jobs:
       published_commit_sha: ${{ needs.publish.outputs.commit_sha }}
       published_output_artifact: ${{ needs.publish.outputs.output_artifact }}
       initial_passed: ${{ needs.publish.outputs.passed }}
+      initial_failure_class: ${{ needs.publish.outputs.failure_class }}
       initial_failure_artifact: ${{ needs.publish.outputs.failure_artifact }}
     secrets:
       CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}

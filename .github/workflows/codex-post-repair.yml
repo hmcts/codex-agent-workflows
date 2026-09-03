@@ -32,6 +32,10 @@ on:
         required: false
         default: "22"
         type: string
+      java_version:
+        required: false
+        default: "21"
+        type: string
       github_app_client_id:
         required: true
         type: string
@@ -86,6 +90,10 @@ on:
       initial_passed:
         required: true
         type: string
+      initial_failure_class:
+        required: false
+        default: implementation
+        type: string
       initial_failure_artifact:
         required: true
         type: string
@@ -106,7 +114,7 @@ on:
 
 jobs:
   repair-published-pr-1-action:
-    if: always() && inputs.initial_passed == 'false'
+    if: always() && inputs.initial_passed == 'false' && inputs.initial_failure_class == 'implementation'
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 120
     permissions:
@@ -292,7 +300,7 @@ jobs:
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ inputs.java_version }}
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -371,7 +379,7 @@ jobs:
       EXPECTED_BASE_SHA: ${{ inputs.source_sha }}
       JIRA_PUBLISH_MODE: repair
       EXPECTED_BRANCH_HEAD_SHA: ${{ inputs.commit_sha }}
-      POLICY_CANDIDATE_BASE_SHA: ${{ inputs.commit_sha }}
+      POLICY_CANDIDATE_BASE_SHA: ${{ inputs.source_sha }}
       CODEX_OUTPUT_ARTIFACT: ${{ needs.verify-published-pr-repair-1.outputs.output_artifact }}
       CODEX_VERIFIED_ARTIFACT: ${{ needs.verify-published-pr-repair-1.outputs.verified_artifact }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
@@ -529,7 +537,7 @@ jobs:
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ inputs.java_version }}
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -669,7 +677,7 @@ jobs:
       PR_NUMBER: ${{ needs.publish-published-pr-repair-1.outputs.pr_number || inputs.pr_number }}
       EXPECTED_HEAD_SHA: ${{ needs.publish-published-pr-repair-1.outputs.commit_sha || inputs.commit_sha }}
       FAILURE_ARTIFACT: ${{ needs.verify-published-pr-1.outputs.failure_artifact || inputs.initial_failure_artifact }}
-      FAILURE_MESSAGE: Required Jenkins, Sonar, or credential-free verification failed after the available automated repair attempt.
+      FAILURE_MESSAGE: ${{ inputs.initial_failure_class == 'no-build' && 'Required Jenkins status reported that this commit cannot be built; no automated repair was attempted.' || 'Required Jenkins, Sonar, or credential-free verification failed after the available automated repair attempt.' }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
       CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
     steps:

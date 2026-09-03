@@ -17,6 +17,7 @@ VERIFY_INITIAL_WORKFLOW = WORKFLOW_ROOT / "codex-verify-initial.yml"
 REPAIR_ROUND_WORKFLOW = WORKFLOW_ROOT / "codex-repair-round.yml"
 VERIFICATION_WORKFLOW = WORKFLOW_ROOT / "codex-verification.yml"
 PUBLISH_WORKFLOW = WORKFLOW_ROOT / "codex-publish.yml"
+POST_VERIFY_WORKFLOW = WORKFLOW_ROOT / "codex-post-verify.yml"
 POST_REPAIR_WORKFLOW = WORKFLOW_ROOT / "codex-post-repair.yml"
 REVIEW_WORKFLOW = WORKFLOW_ROOT / "codex-review-feedback.yml"
 REVIEW_INTAKE_WORKFLOW = WORKFLOW_ROOT / "codex-review-intake.yml"
@@ -288,7 +289,7 @@ class WorkflowContractTests(unittest.TestCase):
             },
             POST_REPAIR_WORKFLOW: {
                 "publish-published-pr-repair-1": (
-                    "${{ inputs.commit_sha }}"
+                    "${{ inputs.source_sha }}"
                 ),
             },
             REVIEW_PUBLISH_WORKFLOW: {
@@ -481,6 +482,60 @@ class WorkflowContractTests(unittest.TestCase):
             verification.count("outputs.failure_class != 'environment'"), 3
         )
         self.assertIn("failure_class:", verification)
+
+    def test_java_version_is_configurable_across_verification_workflows(self):
+        for workflow in (
+            IMPLEMENT_WORKFLOW,
+            VERIFICATION_WORKFLOW,
+            VERIFY_INITIAL_WORKFLOW,
+            REPAIR_ROUND_WORKFLOW,
+            POST_VERIFY_WORKFLOW,
+            POST_REPAIR_WORKFLOW,
+            REVIEW_WORKFLOW,
+            REVIEW_GENERATE_WORKFLOW,
+            REVIEW_REPAIR_WORKFLOW,
+        ):
+            content = workflow.read_text(encoding="utf-8")
+            self.assertIn("java_version:", content, workflow)
+
+        for workflow in (
+            VERIFY_INITIAL_WORKFLOW,
+            REPAIR_ROUND_WORKFLOW,
+            POST_VERIFY_WORKFLOW,
+            POST_REPAIR_WORKFLOW,
+            REVIEW_GENERATE_WORKFLOW,
+            REVIEW_REPAIR_WORKFLOW,
+        ):
+            content = workflow.read_text(encoding="utf-8")
+            self.assertNotIn("java-version: 21", content, workflow)
+            self.assertIn("java-version: ${{ inputs.java_version }}", content, workflow)
+
+    def test_unbuildable_jenkins_status_skips_model_repair(self):
+        post_verify = POST_VERIFY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("failure_class=no-build", post_verify)
+
+        post_repair = workflow_job(
+            POST_REPAIR_WORKFLOW, "repair-published-pr-1-action"
+        )
+        self.assertIn("inputs.initial_failure_class == 'implementation'", post_repair)
+
+        review_publish = REVIEW_PUBLISH_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("failure_class=no-build", review_publish)
+        review_source = workflow_job(
+            REVIEW_REPAIR_WORKFLOW, "prepare-published-review-repair-source"
+        )
+        self.assertIn("inputs.initial_failure_class == 'implementation'", review_source)
+
+    def test_command_timeouts_are_classified_as_environment_failures(self):
+        for workflow in (
+            VERIFY_INITIAL_WORKFLOW,
+            REPAIR_ROUND_WORKFLOW,
+            POST_VERIFY_WORKFLOW,
+        ):
+            content = workflow.read_text(encoding="utf-8")
+            self.assertIn("-eq 124", content, workflow)
+            self.assertIn("-eq 137", content, workflow)
+            self.assertIn("failure_class=environment", content, workflow)
 
     def test_planning_and_implementation_models_are_pinned(self):
         planner = workflow_job(PLAN_WORKFLOW, "codex-plan-action")
