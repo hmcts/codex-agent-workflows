@@ -87,7 +87,7 @@ jobs:
   plan:
     permissions:
       contents: read
-    uses: ./.github/workflows/codex-plan.yml
+    uses: $/.github/workflows/codex-plan.yml
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
@@ -108,7 +108,7 @@ jobs:
     if: needs.plan.outputs.ready_to_implement == 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/codex-generate.yml
+    uses: $/.github/workflows/codex-generate.yml
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
@@ -134,7 +134,7 @@ jobs:
     if: needs.generate.outputs.has_changes == 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/codex-verification.yml
+    uses: $/.github/workflows/codex-verification.yml
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
@@ -159,7 +159,7 @@ jobs:
     if: always() && needs.generate.outputs.has_changes == 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/codex-publish.yml
+    uses: $/.github/workflows/codex-publish.yml
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
@@ -186,7 +186,7 @@ jobs:
     if: always() && needs.publish.outputs.ready_published == 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/codex-post-verify.yml
+    uses: $/.github/workflows/codex-post-verify.yml
     with:
       node_version: ${{ inputs.node_version }}
       sonar_host_url: ${{ inputs.sonar_host_url }}
@@ -208,7 +208,7 @@ jobs:
     if: always() && needs.publish.outputs.ready_published == 'true' && needs.verify-published-pr.outputs.passed == 'false'
     permissions:
       contents: read
-    uses: ./.github/workflows/codex-post-repair.yml
+    uses: $/.github/workflows/codex-post-repair.yml
     with:
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
