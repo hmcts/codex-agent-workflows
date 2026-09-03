@@ -92,7 +92,7 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout current default branch
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.DEFAULT_BRANCH }}
           fetch-depth: 0
@@ -113,7 +113,7 @@ jobs:
           echo "sha=${current_sha}" >>"$GITHUB_OUTPUT"
 
       - name: Checkout candidate policy base
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
           fetch-depth: 0
@@ -121,7 +121,7 @@ jobs:
           path: codex-policy-candidate
 
       - name: Download Codex review output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: codex-review-output
           path: ${{ runner.temp }}/codex-output
@@ -166,7 +166,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/codex-pr-review-publish.sh"
 
       - name: Download verified Codex review output
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: codex-review-verified
           path: ${{ runner.temp }}/codex-verified
@@ -219,7 +219,7 @@ jobs:
         uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
 
       - name: Checkout trusted status scripts
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.trusted_sha }}
           persist-credentials: false
@@ -246,7 +246,7 @@ jobs:
 
       - name: Upload external status failure
         if: steps.verify.outputs.passed != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: codex-review-external-status-failure
           path: ${{ runner.temp }}/codex-review-external-status-failure
