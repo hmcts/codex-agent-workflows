@@ -40,7 +40,10 @@ def workflow_job(workflow: Path, job_name: str) -> str:
 
 class WorkflowContractTests(unittest.TestCase):
     def test_internal_reusable_workflows_use_same_release_components(self):
-        pattern = re.compile(r"uses: \./(\.github/workflows/[^\s]+)")
+        pattern = re.compile(r"uses: \$/(\.github/workflows/[^\s]+)")
+        workspace_relative_pattern = re.compile(
+            r"uses: \./\.github/workflows/[^\s]+"
+        )
         external_pattern = re.compile(
             r"uses: hmcts/codex-agent-workflows/\.github/workflows/[^@\s]+@"
         )
@@ -50,6 +53,10 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIsNone(
                 external_pattern.search(content),
                 f"{workflow.name} must load internal stages from the caller release",
+            )
+            self.assertIsNone(
+                workspace_relative_pattern.search(content),
+                f"{workflow.name} must not resolve internal stages from the caller repository",
             )
             references.extend(pattern.findall(content))
         self.assertTrue(references)
