@@ -19,6 +19,8 @@ The generated workflow inventory and Mermaid diagrams are available in [`docs/wo
 
 The principal runtime scripts, their trust boundaries and their hand-off contracts are documented in [`docs/script-reference.md`](docs/script-reference.md).
 
+The controlled feature-branch test process and evidence requirements are documented in [`docs/acceptance-testing.md`](docs/acceptance-testing.md).
+
 ## Release policy
 
 Changes to reusable workflows require CODEOWNERS review. A push to `main` runs `Update caller workflow pins`, which uses the restricted bot identity to raise full-SHA update PRs in every onboarded Juror repository. The workflow skips repositories that have not yet merged their caller wrappers.

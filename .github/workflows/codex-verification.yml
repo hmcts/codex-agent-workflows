@@ -63,6 +63,8 @@ on:
         value: ${{ jobs.repair-3.outputs.has_changes == 'true' && jobs.repair-3.outputs.draft_artifact || jobs.repair-2.outputs.has_changes == 'true' && jobs.repair-2.outputs.draft_artifact || jobs.repair-1.outputs.has_changes == 'true' && jobs.repair-1.outputs.draft_artifact || jobs.initial.outputs.draft_artifact }}
       latest_failure_artifact:
         value: ${{ jobs.repair-3.outputs.has_changes == 'true' && jobs.repair-3.outputs.failure_artifact || jobs.repair-2.outputs.has_changes == 'true' && jobs.repair-2.outputs.failure_artifact || jobs.repair-1.outputs.has_changes == 'true' && jobs.repair-1.outputs.failure_artifact || jobs.initial.outputs.failure_artifact }}
+      failure_class:
+        value: ${{ jobs.repair-3.outputs.has_changes == 'true' && jobs.repair-3.outputs.failure_class || jobs.repair-2.outputs.has_changes == 'true' && jobs.repair-2.outputs.failure_class || jobs.repair-1.outputs.has_changes == 'true' && jobs.repair-1.outputs.failure_class || jobs.initial.outputs.failure_class }}
     secrets:
       CODEX_OPENAI_API_KEY:
         required: true
@@ -79,7 +81,7 @@ jobs:
 
   repair-1:
     needs: initial
-    if: inputs.has_changes == 'true' && needs.initial.outputs.passed != 'true'
+    if: inputs.has_changes == 'true' && needs.initial.outputs.passed != 'true' && needs.initial.outputs.failure_class != 'environment'
     permissions:
       contents: read
     uses: ./.github/workflows/codex-repair-round.yml
@@ -107,7 +109,7 @@ jobs:
 
   repair-2:
     needs: repair-1
-    if: needs.repair-1.outputs.has_changes == 'true' && needs.repair-1.outputs.passed != 'true'
+    if: needs.repair-1.outputs.has_changes == 'true' && needs.repair-1.outputs.passed != 'true' && needs.repair-1.outputs.failure_class != 'environment'
     permissions:
       contents: read
     uses: ./.github/workflows/codex-repair-round.yml
@@ -135,7 +137,7 @@ jobs:
 
   repair-3:
     needs: repair-2
-    if: needs.repair-2.outputs.has_changes == 'true' && needs.repair-2.outputs.passed != 'true'
+    if: needs.repair-2.outputs.has_changes == 'true' && needs.repair-2.outputs.passed != 'true' && needs.repair-2.outputs.failure_class != 'environment'
     permissions:
       contents: read
     uses: ./.github/workflows/codex-repair-round.yml

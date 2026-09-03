@@ -15,6 +15,7 @@ PLAN_WORKFLOW = WORKFLOW_ROOT / "codex-plan.yml"
 GENERATE_WORKFLOW = WORKFLOW_ROOT / "codex-generate.yml"
 VERIFY_INITIAL_WORKFLOW = WORKFLOW_ROOT / "codex-verify-initial.yml"
 REPAIR_ROUND_WORKFLOW = WORKFLOW_ROOT / "codex-repair-round.yml"
+VERIFICATION_WORKFLOW = WORKFLOW_ROOT / "codex-verification.yml"
 PUBLISH_WORKFLOW = WORKFLOW_ROOT / "codex-publish.yml"
 POST_REPAIR_WORKFLOW = WORKFLOW_ROOT / "codex-post-repair.yml"
 REVIEW_WORKFLOW = WORKFLOW_ROOT / "codex-review-feedback.yml"
@@ -58,7 +59,7 @@ class WorkflowContractTests(unittest.TestCase):
                 f"same-release workflow component is missing: {path}",
             )
 
-    def test_immutable_runtime_pin_packages_policy_preparer(self):
+    def test_immutable_runtime_pin_is_released_and_packages_policy_preparer(self):
         pins = set()
         pattern = re.compile(
             r"hmcts/codex-agent-workflows/\.github/actions/runtime@([0-9a-f]{40})"
@@ -68,6 +69,17 @@ class WorkflowContractTests(unittest.TestCase):
 
         self.assertEqual(len(pins), 1)
         pin = pins.pop()
+        released = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", pin, "origin/main"],
+            cwd=ROOT.parent,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            released.returncode,
+            0,
+            f"immutable runtime {pin} is not part of origin/main",
+        )
         for path in (
             ".github/scripts/check-codex-pr-safety.rb",
             ".github/scripts/codex-prepare-policy-candidate.sh",
@@ -87,11 +99,7 @@ class WorkflowContractTests(unittest.TestCase):
             )
 
         recovery_helper = subprocess.run(
-            [
-                "git",
-                "show",
-                f"{pin}:.github/scripts/codex-recover-pr-state.py",
-            ],
+            ["git", "show", f"{pin}:.github/scripts/codex-recover-pr-state.py"],
             cwd=ROOT.parent,
             capture_output=True,
             text=True,
@@ -430,6 +438,37 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("available=false", job)
         self.assertIn("codex-jira-terminal-draft", job)
         self.assertIn("  codex-prepublication-terminal-failed:", content)
+
+    def test_transient_browser_failure_retries_without_model_repair(self):
+        for workflow in (VERIFY_INITIAL_WORKFLOW, REPAIR_ROUND_WORKFLOW):
+            content = workflow.read_text(encoding="utf-8")
+            self.assertIn("is_transient_browser_failure()", content)
+            self.assertIn("codex-verification-attempt-2.log", content)
+            self.assertIn(
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", content
+            )
+            self.assertIn(
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", content
+            )
+            self.assertIn("failure_class=environment", content)
+            self.assertIn("failure_class=implementation", content)
+
+        verification = VERIFICATION_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(
+            verification.count("outputs.failure_class != 'environment'"), 3
+        )
+        self.assertIn("failure_class:", verification)
+
+    def test_planning_and_implementation_models_are_pinned(self):
+        planner = workflow_job(PLAN_WORKFLOW, "codex-plan-action")
+        implementation = workflow_job(GENERATE_WORKFLOW, "codex-generate-action")
+        repair = workflow_job(REPAIR_ROUND_WORKFLOW, "repair-action")
+
+        self.assertIn("model: gpt-5.6-sol", planner)
+        self.assertIn("effort: ultra", planner)
+        for job in (implementation, repair):
+            self.assertIn("model: gpt-5.6-sol", job)
+            self.assertIn("effort: medium", job)
 
     def test_review_setup_failure_returns_existing_pr_to_draft(self):
         content = REVIEW_GENERATE_WORKFLOW.read_text(encoding="utf-8")
