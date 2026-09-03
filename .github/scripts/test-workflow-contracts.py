@@ -513,6 +513,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_unbuildable_jenkins_status_skips_model_repair(self):
         post_verify = POST_VERIFY_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("failure_class=no-build", post_verify)
+        self.assertIn('echo "failure_class=${failure_class}"', post_verify)
 
         post_repair = workflow_job(
             POST_REPAIR_WORKFLOW, "repair-published-pr-1-action"
@@ -521,6 +522,7 @@ class WorkflowContractTests(unittest.TestCase):
 
         review_publish = REVIEW_PUBLISH_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("failure_class=no-build", review_publish)
+        self.assertIn('echo "failure_class=${failure_class}"', review_publish)
         review_source = workflow_job(
             REVIEW_REPAIR_WORKFLOW, "prepare-published-review-repair-source"
         )

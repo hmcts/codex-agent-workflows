@@ -193,16 +193,17 @@ jobs:
             exit 0
           fi
           set +e
-          (
+          failure_class=implementation
+          {
             ${CODEX_RUNTIME_PATH}/.github/scripts/codex-wait-pr-status.sh
             status=$?
-            if [[ "$status" -eq 0 ]]; then
+            if [[ "$status" -eq 2 ]]; then
+              failure_class=no-build
+            elif [[ "$status" -eq 0 ]]; then
               ${CODEX_RUNTIME_PATH}/.github/scripts/codex-check-sonar-quality-gate.sh
               status=$?
             fi
-            exit "$status"
-          ) >"$RUNNER_TEMP/codex-pr-status.log" 2>&1
-          status=$?
+          } >"$RUNNER_TEMP/codex-pr-status.log" 2>&1
           cat "$RUNNER_TEMP/codex-pr-status.log"
           echo "failure_artifact=$STATUS_FAILURE_ARTIFACT" >>"$GITHUB_OUTPUT"
           if [[ "$status" -eq 0 ]]; then
@@ -213,11 +214,7 @@ jobs:
             cp "$RUNNER_TEMP/codex-pr-status.log" "$RUNNER_TEMP/codex-pr-status-failure/verification-failure.log"
             tail -n 240 "$RUNNER_TEMP/codex-pr-status.log" >"$RUNNER_TEMP/codex-pr-status-failure/verification-failure-summary.log"
             echo "passed=false" >>"$GITHUB_OUTPUT"
-            if [[ "$status" -eq 2 ]]; then
-              echo "failure_class=no-build" >>"$GITHUB_OUTPUT"
-            else
-              echo "failure_class=implementation" >>"$GITHUB_OUTPUT"
-            fi
+            echo "failure_class=${failure_class}" >>"$GITHUB_OUTPUT"
           fi
           exit 0
       - name: Upload external status failure
