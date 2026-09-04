@@ -123,6 +123,8 @@ jobs:
         completed = self.run_check({"codex_pr_review.yml": trusted_review_wrapper()})
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
+        self.assertIn('java_version: "17"', trusted_review_wrapper())
+
         mutations = {
             "40-character SHA": trusted_review_wrapper().replace(
                 f"@{'1' * 40}", "@main", 1

@@ -41,6 +41,7 @@ TRUSTED_REVIEW_IF = "${{ github.event.issue.pull_request && github.event.comment
 TRUSTED_REVIEW_INPUTS = %w[
   runner_label
   node_version
+  java_version
   github_app_client_id
   sonar_host_url
   sonar_project_key

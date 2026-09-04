@@ -55,11 +55,11 @@ jobs:
 
       - name: Lint GitHub Actions workflows
         # actionlint 1.7.x does not yet recognise GitHub's $/ self-repository
-        # syntax. Contract tests validate these references and their targets.
+        # action syntax. Contract tests restrict it to the shared runtime.
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 \
             -shellcheck= \
-            -ignore 'reusable workflow call "\$/\.github/workflows/' \
+            -ignore 'specifying action "\$/\.github/actions/runtime"' \
             .github/workflows/*.yml
 
       - name: Check generated workflow documentation

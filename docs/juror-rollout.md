@@ -26,6 +26,12 @@ Configure `hmcts/codex-agent-workflows` with the same App client ID and private 
 
 The App private key and short-lived installation token are available only to fresh trusted token-minting and publication steps. Generated code and verification jobs must not receive the OpenAI API key, App credentials, publisher token or Jira callback URL.
 
+## Jenkins pull-request eligibility
+
+Jenkins must discover same-repository branches published by the installed HMCTS GitHub App, load the trusted base-branch Jenkinsfile and execute the normal required pipeline. Do not broaden this policy to trust arbitrary fork pull requests or execute a generated Jenkinsfile.
+
+The legacy `continuous-integration/jenkins/pr-head` context can report `This commit cannot be built` after Jenkins has started and failed a pipeline. Treat the status as fail-closed and do not spend Codex repair calls on it, but inspect the linked Jenkins console before classifying the cause as an ineligible or skipped build. Record the underlying pipeline failure in the acceptance evidence and keep the pull request in draft.
+
 ## Jira repository labels and dispatch rule
 
 Route each JS issue using exactly one of these labels:
@@ -49,7 +55,7 @@ The dispatch rule triggers when `codex-ready` is added. It must:
 5. POST the issue key, summary, description, status, assignee, labels, issue URL and initiating display name to the Azure Function. The Function resolves the repository from the label.
 6. Restore a usable state and comment when dispatch itself is rejected.
 
-The JS callback rule consumes the Azure Function's project-specific webhook. For `pr-created`, transition to `Peer Review`, add `pr-ready`, remove `codex-running` and comment with the PR and workflow links. For `codex-blocked`, `codex-failed` or `codex-no-changes`, remove `codex-running` and comment with the supplied message and workflow link.
+The JS callback rule consumes the Azure Function's project-specific webhook. For `pr-created`, transition to `Peer Review`, add `pr-ready`, remove `codex-running` and comment with the PR and workflow links. For `draft-pr-created`, transition or return to `In Progress`, add the failure comment, then remove `codex-ready`, `codex-running` and `pr-ready`. For `codex-blocked`, `codex-failed` or `codex-no-changes`, return to `In Progress`, comment with the supplied message and workflow link, then remove the same running and ready labels.
 
 ## Generated-revision event policy
 
@@ -88,7 +94,8 @@ These exclusions do not authorize a trusted workflow to turn arbitrary event fie
 13. Configure the GitHub repository secrets and variables.
 14. Set `enable_juror_runner_scale_sets = true`, review the Terraform plan and apply it.
 15. Confirm all seven scale sets register with `minRunners = 0` and `maxRunners = 1`.
-16. Enable the Jira dispatch rule.
+16. Confirm Jenkins accepts a same-repository pull request authored by `hmcts-pr-publisher[bot]`, loads the trusted base-branch Jenkinsfile and starts its required checks automatically. If the legacy status reports `This commit cannot be built`, inspect the linked console and record whether the pipeline was skipped or failed after starting.
+17. Enable the Jira dispatch rule.
 
 The read-only live audit on 2026-08-19 intentionally blocked all seven `master` branches. These are the observed diagnostics to remediate, not an exemption list; rerun the exact release-pinned checker because caller workflows can change:
 
@@ -114,6 +121,7 @@ Run one controlled Jira-to-PR test in every repository. Confirm:
 - exhausted or unavailable verification creates a draft PR with exact evidence;
 - impossible work clears `codex-running` and comments with the blockers;
 - existing Jenkins, Sonar, functional and smoke checks start normally;
+- Jenkins accepts the App-authored same-repository branch without approving generated workflow or Jenkinsfile changes; any generic `This commit cannot be built` result remains fail-closed and its underlying Jenkins console failure is recorded;
 - a repository collaborator, member or owner can invoke an exact `/codex-review` issue comment on a Codex PR, while review submissions, review comments, non-PR comments, command variants and other author associations cannot invoke it;
 - the issue moves to `Peer Review` and receives `pr-ready` when a PR is created;
 - runner pods contain no OpenAI or publisher credentials;

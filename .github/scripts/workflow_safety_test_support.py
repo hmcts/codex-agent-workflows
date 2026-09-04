@@ -47,6 +47,7 @@ jobs:
     uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-feedback.yml@{pin}
     with:
       runner_label: codex-juror-api-aks
+      java_version: "17"
       github_app_client_id: ${{{{ vars.CODEX_GITHUB_APP_CLIENT_ID }}}}
       sonar_host_url: {sonar_host_url}
       sonar_project_key: juror-api

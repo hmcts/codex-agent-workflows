@@ -28,7 +28,7 @@ jobs:
       head_ref: ${{ steps.detect.outputs.head_ref }}
     steps:
       - name: Locate trusted Codex runtime
-        uses: hmcts/codex-agent-workflows/.github/actions/runtime@251cd5e577c0cb9acb22b953264ab5514a350402
+        uses: $/.github/actions/runtime
 
       - name: Detect Codex PR
         id: detect
