@@ -139,8 +139,10 @@ jobs:
           test -z "$(git config --local --get-all http.https://github.com/.extraheader || true)"
           test -z "$(git config --local --get-all credential.helper || true)"
           tar -czf "$RUNNER_TEMP/codex-review-published-source.tar.gz" .
+          mkdir -p "$RUNNER_TEMP/trusted-safety/lib/codex_workflow_safety"
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-verify.sh "$RUNNER_TEMP/trusted-codex-pr-review-verify.sh"
-          cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb "$RUNNER_TEMP/trusted-check-codex-pr-safety.rb"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb "$RUNNER_TEMP/trusted-safety/trusted-check-codex-pr-safety.rb"
+          cp -R ${CODEX_RUNTIME_PATH}/.github/scripts/lib/codex_workflow_safety/. "$RUNNER_TEMP/trusted-safety/lib/codex_workflow_safety/"
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh "$RUNNER_TEMP/trusted-codex-prepare-policy-candidate.sh"
           cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
           echo "head_sha=${PUBLISHED_HEAD_SHA}" >>"$GITHUB_OUTPUT"
@@ -153,7 +155,7 @@ jobs:
           path: |
             ${{ runner.temp }}/codex-review-published-source.tar.gz
             ${{ runner.temp }}/trusted-codex-pr-review-verify.sh
-            ${{ runner.temp }}/trusted-check-codex-pr-safety.rb
+            ${{ runner.temp }}/trusted-safety
             ${{ runner.temp }}/trusted-codex-prepare-policy-candidate.sh
             ${{ runner.temp }}/trusted-codex-local-pipeline.sh
           if-no-files-found: error
@@ -349,7 +351,7 @@ jobs:
         env:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
           TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
-          TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-check-codex-pr-safety.rb
+          TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-safety/trusted-check-codex-pr-safety.rb
           TRUSTED_POLICY_PREPARER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-prepare-policy-candidate.sh
         run: |
           set +e
