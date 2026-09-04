@@ -31,10 +31,12 @@ artifact_dir="${RUNNER_TEMP:-/tmp}/codex-review-verify-${GITHUB_RUN_ID:-manual}-
 sanitized_home="${artifact_dir}/sanitized-home"
 sanitized_tmp="${artifact_dir}/sanitized-tmp"
 trusted_pipeline_path="${artifact_dir}/trusted-codex-local-pipeline.sh"
+trusted_policy_preparer_path="${artifact_dir}/trusted-codex-prepare-policy-candidate.sh"
 trusted_repository_root="${artifact_dir}/trusted-repository"
 safety_gate_path="${TRUSTED_PR_SAFETY_PATH}"
-policy_preparer_path="${TRUSTED_POLICY_PREPARER_PATH}"
+policy_preparer_source_path="${TRUSTED_POLICY_PREPARER_PATH}"
 trusted_pipeline_sha=""
+trusted_policy_preparer_sha=""
 guardrail_review_required="false"
 guardrail_pathspecs=(
   "bin/codex-local-pipeline.sh"
@@ -191,6 +193,14 @@ cp "${TRUSTED_PIPELINE_PATH}" "${trusted_pipeline_path}"
 chmod +x "${trusted_pipeline_path}"
 trusted_pipeline_sha="$(file_sha256 "${trusted_pipeline_path}")"
 
+if [[ ! -f "${policy_preparer_source_path}" || -L "${policy_preparer_source_path}" ]]; then
+  echo "Missing trusted policy candidate preparer: ${policy_preparer_source_path}" >&2
+  exit 1
+fi
+cp "${policy_preparer_source_path}" "${trusted_policy_preparer_path}"
+chmod +x "${trusted_policy_preparer_path}"
+trusted_policy_preparer_sha="$(file_sha256 "${trusted_policy_preparer_path}")"
+
 actual_head_sha="$(git_sanitized rev-parse HEAD)"
 actual_base_sha="$(git_sanitized rev-parse "refs/remotes/origin/${base_ref}")"
 if [[ "${actual_head_sha}" != "${EXPECTED_HEAD_SHA}" || "${actual_base_sha}" != "${EXPECTED_BASE_SHA}" ]]; then
@@ -198,17 +208,17 @@ if [[ "${actual_head_sha}" != "${EXPECTED_HEAD_SHA}" || "${actual_base_sha}" != 
   exit 1
 fi
 git_sanitized checkout -B "${head_ref}" "${EXPECTED_HEAD_SHA}"
-if [[ ! -f "${policy_preparer_path}" || -L "${policy_preparer_path}" ]]; then
-  echo "Missing trusted policy candidate preparer: ${policy_preparer_path}" >&2
-  exit 1
-fi
+verify_trusted_file \
+  "${trusted_policy_preparer_path}" \
+  "${trusted_policy_preparer_sha}" \
+  "policy candidate preparer"
 run_sanitized env \
   CANDIDATE_ROOT="$(pwd -P)" \
   EXPECTED_CANDIDATE_SHA="${EXPECTED_HEAD_SHA}" \
   PATCH_PATH="${patch_path}" \
   TRUSTED_REPOSITORY_ROOT="${trusted_repository_root}" \
   EXPECTED_TRUSTED_SHA="${EXPECTED_BASE_SHA}" \
-  "${policy_preparer_path}"
+  "${trusted_policy_preparer_path}"
 
 if [[ ! -f "${safety_gate_path}" || -L "${safety_gate_path}" ]]; then
   echo "Missing trusted PR credential safety gate: ${safety_gate_path}" >&2

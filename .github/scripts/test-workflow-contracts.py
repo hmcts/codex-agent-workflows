@@ -413,7 +413,12 @@ class WorkflowContractTests(unittest.TestCase):
     def test_verifiers_gate_applied_patch_with_trusted_checker(self):
         for name in ("codex-jira-verify.sh", "codex-pr-review-verify.sh"):
             content = (ROOT / "scripts" / name).read_text(encoding="utf-8")
-            prepare = content.index('"${policy_preparer_path}"')
+            preparer_path = (
+                '"${trusted_policy_preparer_path}"'
+                if name == "codex-pr-review-verify.sh"
+                else '"${policy_preparer_path}"'
+            )
+            prepare = content.index(preparer_path)
             safety_gate = content.index(
                 'run_sanitized ruby --disable-gems "${safety_gate_path}"'
             )
@@ -440,6 +445,22 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertEqual(content.count("TRUSTED_POLICY_PREPARER_PATH:"), 2)
         self.assertNotIn("trusted-check-codex-pr-safety.py", content)
+
+    def test_review_verifier_restores_policy_preparer_executable_permission(self):
+        content = (ROOT / "scripts" / "codex-pr-review-verify.sh").read_text(
+            encoding="utf-8"
+        )
+        copy = content.index(
+            'cp "${policy_preparer_source_path}" "${trusted_policy_preparer_path}"'
+        )
+        chmod = content.index('chmod +x "${trusted_policy_preparer_path}"')
+        verify = content.index(
+            '"${trusted_policy_preparer_sha}" \\\n  "policy candidate preparer"'
+        )
+        execute = content.index('  "${trusted_policy_preparer_path}"', verify)
+        self.assertLess(copy, chmod)
+        self.assertLess(chmod, verify)
+        self.assertLess(verify, execute)
 
     def test_jira_no_change_result_has_terminal_callback(self):
         job = workflow_job(GENERATE_WORKFLOW, "codex-no-changes")
