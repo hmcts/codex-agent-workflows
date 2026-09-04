@@ -128,6 +128,14 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn("CODEX_JIRA_PR_NOTIFY_URL:", content)
             self.assertIn("required: true", content)
 
+    def test_review_repair_call_preserves_required_read_permissions(self):
+        job = workflow_job(REVIEW_WORKFLOW, "repair")
+        self.assertIn("permissions:", job)
+        self.assertIn("contents: read", job)
+        self.assertIn("pull-requests: read", job)
+        self.assertIn("issues: read", job)
+        self.assertIn("uses: ./.github/workflows/codex-review-repair.yml", job)
+
     def test_validated_plan_bundle_is_retained(self):
         content = PLAN_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("name: codex-validated-plan", content)
