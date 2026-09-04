@@ -19,6 +19,7 @@ PR_NUMBER="${PR_NUMBER:-${SONAR_PR_NUMBER:-}}"
 required_env "PR_NUMBER"
 
 status_context="${REQUIRED_STATUS_CONTEXT:-continuous-integration/jenkins/pr-head}"
+no_build_description="${REQUIRED_STATUS_NO_BUILD_DESCRIPTION:-This commit cannot be built}"
 timeout_seconds="${REQUIRED_STATUS_TIMEOUT_SECONDS:-2700}"
 poll_seconds="${REQUIRED_STATUS_POLL_SECONDS:-30}"
 sonar_host_url="${SONAR_HOST_URL:-https://sonarcloud.io}"
@@ -154,6 +155,12 @@ while true; do
       exit 0
       ;;
     failure | error)
+      if [[ "${state}" == "error" && "${description}" == "${no_build_description}" ]]; then
+        echo "::warning::Required status reported that this commit is not buildable: ${status_context}"
+        echo "Description: ${description}"
+        echo "Target URL: ${target_url}"
+        exit 2
+      fi
       echo "::error::Required status failed: ${status_context}=${state}"
       echo "Description: ${description}"
       echo "Target URL: ${target_url}"

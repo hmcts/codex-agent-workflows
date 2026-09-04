@@ -10,6 +10,10 @@ on:
         required: false
         default: "22"
         type: string
+      java_version:
+        required: false
+        default: "21"
+        type: string
       github_app_client_id:
         required: true
         type: string
@@ -58,6 +62,10 @@ on:
       initial_passed:
         required: true
         type: string
+      initial_failure_class:
+        required: false
+        default: implementation
+        type: string
       initial_failure_artifact:
         required: true
         type: string
@@ -81,7 +89,7 @@ permissions:
 
 jobs:
   prepare-published-review-repair-source:
-    if: always() && inputs.initial_passed == 'false'
+    if: always() && inputs.initial_passed == 'false' && inputs.initial_failure_class == 'implementation'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -320,7 +328,7 @@ jobs:
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ inputs.java_version }}
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -577,7 +585,7 @@ jobs:
       PR_NUMBER: ${{ needs.codex-review-external-republish.outputs.pr_number || inputs.pr_number }}
       EXPECTED_HEAD_SHA: ${{ needs.codex-review-external-republish.outputs.commit_sha || inputs.published_commit_sha }}
       FAILURE_ARTIFACT: ${{ needs.verify-review-status-repair.outputs.failure_artifact || needs.codex-review-external-repair-verify.outputs.failure_artifact || inputs.initial_failure_artifact }}
-      FAILURE_MESSAGE: Required Jenkins, Sonar, or credential-free verification failed after the available automated review-feedback repair attempt.
+      FAILURE_MESSAGE: ${{ inputs.initial_failure_class == 'no-build' && 'Required Jenkins status reported that this commit cannot be built; no automated repair was attempted.' || inputs.initial_failure_class == 'environment' && 'Credential-free verification was blocked by runner infrastructure; no automated repair was attempted.' || 'Required Jenkins, Sonar, or credential-free verification failed after the available automated review-feedback repair attempt.' }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
       CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
     steps:

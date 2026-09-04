@@ -56,6 +56,7 @@ flowchart LR
     Verify -->|repairs exhausted| Draft[Draft PR with evidence]
     Publish --> Checks[Jenkins, Sonar and required checks]
     Checks -->|failed| PostRepair[Post-publication repair]
+    Checks -->|not buildable| Draft
     Checks -->|passed| Ready[Ready PR and Jira callback]
 ```
 
