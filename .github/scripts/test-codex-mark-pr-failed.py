@@ -41,6 +41,7 @@ class MarkPrFailedTest(unittest.TestCase):
             pull_request = {
                 "state": "open",
                 "draft": draft,
+                "html_url": "https://github.com/hmcts/juror-api/pull/42",
                 "title": "JS-123: Correct juror record",
                 "body": (
                     "### Jira link\n\n"
@@ -48,6 +49,7 @@ class MarkPrFailedTest(unittest.TestCase):
                 ),
                 "head": {
                     "sha": actual_sha,
+                    "ref": "codex/js-123-12345-1",
                     "repo": {"full_name": "hmcts/juror-api"},
                 },
             }
@@ -163,7 +165,16 @@ class MarkPrFailedTest(unittest.TestCase):
             jira_payloads[0]["issueUrl"],
             "https://tools.hmcts.net/jira/browse/JS-123",
         )
-        self.assertEqual(jira_payloads[0]["status"], "failed")
+        self.assertEqual(
+            jira_payloads[0]["prUrl"],
+            "https://github.com/hmcts/juror-api/pull/42",
+        )
+        self.assertEqual(jira_payloads[0]["prTitle"], "JS-123: Correct juror record")
+        self.assertEqual(jira_payloads[0]["branchName"], "codex/js-123-12345-1")
+        self.assertEqual(jira_payloads[0]["commitSha"], EXPECTED_SHA)
+        self.assertTrue(jira_payloads[0]["isDraft"])
+        self.assertEqual(jira_payloads[0]["verificationStatus"], "failed")
+        self.assertNotIn("status", jira_payloads[0])
 
 
 if __name__ == "__main__":
