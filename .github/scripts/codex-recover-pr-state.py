@@ -9,12 +9,17 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 class RecoveryError(RuntimeError):
     pass
+
+
+DEFAULT_RECOVERY_ATTEMPTS = 6
+DEFAULT_RETRY_DELAY_SECONDS = 2.0
 
 
 def require_base_sha(base_sha: str) -> None:
@@ -256,38 +261,95 @@ def recover_fresh_pull_request(
     head_sha: str,
     draft: bool,
     allow_missing: bool,
+    attempts: int = 1,
+    retry_delay_seconds: float = 0,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
-    discovered = recover_pull_request(
-        pull_requests,
-        repository=repository,
-        base_ref=base_ref,
-        base_sha=base_sha,
-        head_ref=head_ref,
-        head_sha=head_sha,
-        draft=draft,
-        allow_missing=allow_missing,
-    )
-    if not discovered["found"]:
-        return discovered
-
-    selected_number = discovered["pr_number"]
-    if not isinstance(selected_number, int) or isinstance(selected_number, bool):
-        raise RecoveryError("Discovered pull request has an invalid number")
-    fresh_pull_request = fetch_pull_request_by_number(repository, selected_number)
-    fresh = validate_pull_request(
-        fresh_pull_request,
-        repository=repository,
-        base_ref=base_ref,
-        base_sha=base_sha,
-        head_ref=head_ref,
-        head_sha=head_sha,
-        draft=draft,
-    )
-    if fresh["pr_number"] != selected_number:
+    require_base_sha(base_sha)
+    related = [
+        pull_request
+        for pull_request in pull_requests
+        if nested_value(pull_request, "head", "ref") == head_ref
+    ]
+    if len(related) > 1:
+        numbers = ", ".join(str(item.get("number", "unknown")) for item in related)
         raise RecoveryError(
-            "Fresh pull request response does not match the discovered number"
+            f"Multiple open pull requests use expected head ref {head_ref}: {numbers}"
         )
-    return fresh
+    if not related:
+        if allow_missing:
+            return {"found": False}
+        raise RecoveryError(
+            f"No open pull request has the exact expected recovery state for {head_ref}"
+        )
+
+    selected_number = related[0].get("number")
+    if (
+        not isinstance(selected_number, int)
+        or isinstance(selected_number, bool)
+        or selected_number <= 0
+    ):
+        raise RecoveryError("Discovered pull request has an invalid number")
+
+    return recover_pull_request_by_number(
+        repository=repository,
+        number=selected_number,
+        base_ref=base_ref,
+        base_sha=base_sha,
+        head_ref=head_ref,
+        head_sha=head_sha,
+        draft=draft,
+        attempts=attempts,
+        retry_delay_seconds=retry_delay_seconds,
+        sleep=sleep,
+    )
+
+
+def recover_pull_request_by_number(
+    *,
+    repository: str,
+    number: int,
+    base_ref: str,
+    base_sha: str,
+    head_ref: str,
+    head_sha: str,
+    draft: bool,
+    attempts: int,
+    retry_delay_seconds: float,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, object]:
+    if attempts < 1:
+        raise RecoveryError("Recovery attempts must be at least 1")
+    if retry_delay_seconds < 0:
+        raise RecoveryError("Recovery retry delay cannot be negative")
+
+    last_error: RecoveryError | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            fresh = validate_pull_request(
+                fetch_pull_request_by_number(repository, number),
+                repository=repository,
+                base_ref=base_ref,
+                base_sha=base_sha,
+                head_ref=head_ref,
+                head_sha=head_sha,
+                draft=draft,
+            )
+            if fresh["pr_number"] != number:
+                raise RecoveryError(
+                    "Fresh pull request response does not match the discovered number"
+                )
+            return fresh
+        except RecoveryError as exc:
+            last_error = exc
+            if attempt < attempts:
+                sleep(retry_delay_seconds)
+
+    assert last_error is not None
+    raise RecoveryError(
+        f"Pull request #{number} did not reach the expected state after "
+        f"{attempts} attempts: {last_error}"
+    ) from last_error
 
 
 def write_output(path: Path, state: dict[str, object], append: bool) -> None:
@@ -327,6 +389,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--draft", choices=("true", "false"), required=True)
     parser.add_argument("--allow-missing", action="store_true")
     parser.add_argument("--pr-url")
+    parser.add_argument(
+        "--attempts", type=int, default=DEFAULT_RECOVERY_ATTEMPTS
+    )
+    parser.add_argument(
+        "--retry-delay-seconds",
+        type=float,
+        default=DEFAULT_RETRY_DELAY_SECONDS,
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--append-output", action="store_true")
     return parser.parse_args(argv)
@@ -337,15 +407,16 @@ def main(argv: list[str] | None = None) -> int:
     draft = args.draft == "true"
     try:
         if args.pr_url:
-            pull_request = fetch_pull_request(args.repository, args.pr_url)
-            state = validate_pull_request(
-                pull_request,
+            state = recover_pull_request_by_number(
                 repository=args.repository,
+                number=pull_request_number(args.pr_url),
                 base_ref=args.base_ref,
                 base_sha=args.base_sha,
                 head_ref=args.head_ref,
                 head_sha=args.head_sha,
                 draft=draft,
+                attempts=args.attempts,
+                retry_delay_seconds=args.retry_delay_seconds,
             )
         else:
             state = recover_fresh_pull_request(
@@ -357,6 +428,8 @@ def main(argv: list[str] | None = None) -> int:
                 head_sha=args.head_sha,
                 draft=draft,
                 allow_missing=args.allow_missing,
+                attempts=args.attempts,
+                retry_delay_seconds=args.retry_delay_seconds,
             )
         write_output(args.output, state, args.append_output)
     except (OSError, RecoveryError) as exc:

@@ -41,10 +41,8 @@ def workflow_job(workflow: Path, job_name: str) -> str:
 
 class WorkflowContractTests(unittest.TestCase):
     def test_internal_reusable_workflows_use_same_release_components(self):
-        pattern = re.compile(r"uses: \$/(\.github/workflows/[^\s]+)")
-        workspace_relative_pattern = re.compile(
-            r"uses: \./\.github/workflows/[^\s]+"
-        )
+        pattern = re.compile(r"uses: \./(\.github/workflows/[^\s]+)")
+        invalid_self_pattern = re.compile(r"uses: \$/\.github/workflows/[^\s]+")
         external_pattern = re.compile(
             r"uses: hmcts/codex-agent-workflows/\.github/workflows/[^@\s]+@"
         )
@@ -52,12 +50,12 @@ class WorkflowContractTests(unittest.TestCase):
         for workflow in COMPONENT_WORKFLOWS:
             content = workflow.read_text(encoding="utf-8")
             self.assertIsNone(
-                external_pattern.search(content),
-                f"{workflow.name} must load internal stages from the caller release",
+                invalid_self_pattern.search(content),
+                f"{workflow.name} uses unsupported $/ reusable-workflow syntax",
             )
             self.assertIsNone(
-                workspace_relative_pattern.search(content),
-                f"{workflow.name} must not resolve internal stages from the caller repository",
+                external_pattern.search(content),
+                f"{workflow.name} must load internal stages from its own immutable release",
             )
             references.extend(pattern.findall(content))
         self.assertTrue(references)
@@ -83,58 +81,46 @@ class WorkflowContractTests(unittest.TestCase):
                     f"{workflow.name} uses mutable external reference: {reference}",
                 )
 
-    def test_immutable_runtime_pin_is_released_and_packages_policy_preparer(self):
-        pins = set()
-        pattern = re.compile(
-            r"hmcts/codex-agent-workflows/\.github/actions/runtime@([0-9a-f]{40})"
-        )
+    def test_components_use_same_release_runtime_and_package_required_scripts(self):
+        pattern = re.compile(r"uses: \$/\.github/actions/runtime(?:\s|$)")
+        self_reference_pattern = re.compile(r"uses: \$/([^\s]+)")
+        references = 0
         for workflow in COMPONENT_WORKFLOWS:
-            pins.update(pattern.findall(workflow.read_text(encoding="utf-8")))
+            content = workflow.read_text(encoding="utf-8")
+            references += len(pattern.findall(content))
+            self.assertEqual(
+                set(self_reference_pattern.findall(content))
+                - {".github/actions/runtime"},
+                set(),
+                f"{workflow.name} contains an unapproved self-repository action",
+            )
+            self.assertNotIn(
+                "hmcts/codex-agent-workflows/.github/actions/runtime@",
+                content,
+                f"{workflow.name} must not pin an older runtime release",
+            )
+        self.assertGreater(references, 0)
 
-        self.assertEqual(len(pins), 1)
-        pin = pins.pop()
-        released = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", pin, "origin/main"],
-            cwd=ROOT.parent,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(
-            released.returncode,
-            0,
-            f"immutable runtime {pin} is not part of origin/main",
-        )
         for path in (
             ".github/scripts/check-codex-pr-safety.rb",
             ".github/scripts/codex-prepare-policy-candidate.sh",
             ".github/scripts/codex-recover-pr-state.py",
             ".github/scripts/codex-review-feedback-data.py",
         ):
-            completed = subprocess.run(
-                ["git", "cat-file", "-e", f"{pin}:{path}"],
-                cwd=ROOT.parent,
-                capture_output=True,
-                text=True,
+            self.assertTrue(
+                (ROOT.parent / path).is_file(),
+                f"same-release runtime does not package {path}",
             )
-            self.assertEqual(
-                completed.returncode,
-                0,
-                f"immutable runtime {pin} does not package {path}: {completed.stderr}",
-            )
-
-        recovery_helper = subprocess.run(
-            ["git", "show", f"{pin}:.github/scripts/codex-recover-pr-state.py"],
-            cwd=ROOT.parent,
-            capture_output=True,
-            text=True,
+        recovery_helper = (ROOT / "scripts" / "codex-recover-pr-state.py").read_text(
+            encoding="utf-8"
         )
-        self.assertEqual(recovery_helper.returncode, 0, recovery_helper.stderr)
         self.assertIn(
             'parser.add_argument("--base-sha", required=True)',
-            recovery_helper.stdout,
+            recovery_helper,
         )
-        self.assertIn("recover_fresh_pull_request", recovery_helper.stdout)
-        self.assertIn("fetch_pull_request_by_number", recovery_helper.stdout)
+        self.assertIn("recover_fresh_pull_request", recovery_helper)
+        self.assertIn("fetch_pull_request_by_number", recovery_helper)
+        self.assertIn("DEFAULT_RECOVERY_ATTEMPTS", recovery_helper)
 
     def test_both_reusable_workflows_require_jira_callback_secret(self):
         for workflow in (IMPLEMENT_WORKFLOW, REVIEW_WORKFLOW):

@@ -187,6 +187,33 @@ class FreshPullRequestRecoveryTests(unittest.TestCase):
         fetch.assert_called_once_with(REPOSITORY, 42)
         return state
 
+    def recover_with_retries(
+        self,
+        responses: list[object],
+        *,
+        draft: bool = False,
+    ) -> tuple[dict[str, object], mock.Mock, mock.Mock]:
+        sleep = mock.Mock()
+        with mock.patch.object(
+            MODULE,
+            "fetch_pull_request_by_number",
+            side_effect=responses,
+        ) as fetch:
+            state = MODULE.recover_fresh_pull_request(
+                [pull_request(42)],
+                repository=REPOSITORY,
+                base_ref=BASE_REF,
+                base_sha=BASE_SHA,
+                head_ref=HEAD_REF,
+                head_sha=HEAD_SHA,
+                draft=draft,
+                allow_missing=False,
+                attempts=len(responses),
+                retry_delay_seconds=0.25,
+                sleep=sleep,
+            )
+        return state, fetch, sleep
+
     def test_unchanged_fresh_record_is_the_only_emitted_state(self):
         discovered = pull_request(42)
         discovered["html_url"] = "https://github.com/hmcts/example/pull/stale"
@@ -236,6 +263,85 @@ class FreshPullRequestRecoveryTests(unittest.TestCase):
                     draft=False,
                     allow_missing=False,
                 )
+
+    def test_retries_until_updated_branch_head_is_visible(self):
+        stale = pull_request(42, head_sha="c" * 40)
+        state, fetch, sleep = self.recover_with_retries(
+            [stale, pull_request(42)]
+        )
+
+        self.assertEqual(state["commit_sha"], HEAD_SHA)
+        self.assertEqual(fetch.call_count, 2)
+        sleep.assert_called_once_with(0.25)
+
+    def test_retries_until_requested_draft_state_is_visible(self):
+        state, fetch, sleep = self.recover_with_retries(
+            [pull_request(42, draft=False), pull_request(42, draft=True)],
+            draft=True,
+        )
+
+        self.assertEqual(state["pr_number"], 42)
+        self.assertEqual(fetch.call_count, 2)
+        sleep.assert_called_once_with(0.25)
+
+    def test_retries_transient_pull_request_fetch_failure(self):
+        state, fetch, sleep = self.recover_with_retries(
+            [MODULE.RecoveryError("HTTP 502"), pull_request(42)]
+        )
+
+        self.assertEqual(state["pr_number"], 42)
+        self.assertEqual(fetch.call_count, 2)
+        sleep.assert_called_once_with(0.25)
+
+    def test_fails_closed_after_bounded_eventual_consistency_retries(self):
+        sleep = mock.Mock()
+        with mock.patch.object(
+            MODULE,
+            "fetch_pull_request_by_number",
+            return_value=pull_request(42, head_sha="c" * 40),
+        ) as fetch:
+            with self.assertRaisesRegex(
+                MODULE.RecoveryError, "did not reach the expected state after 3 attempts"
+            ):
+                MODULE.recover_fresh_pull_request(
+                    [pull_request(42)],
+                    repository=REPOSITORY,
+                    base_ref=BASE_REF,
+                    base_sha=BASE_SHA,
+                    head_ref=HEAD_REF,
+                    head_sha=HEAD_SHA,
+                    draft=False,
+                    allow_missing=False,
+                    attempts=3,
+                    retry_delay_seconds=0.25,
+                    sleep=sleep,
+                )
+
+        self.assertEqual(fetch.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_allow_missing_does_not_wait_or_query_by_number(self):
+        sleep = mock.Mock()
+        with mock.patch.object(
+            MODULE, "fetch_pull_request_by_number"
+        ) as fetch:
+            state = MODULE.recover_fresh_pull_request(
+                [pull_request(1, head_ref="codex/unrelated")],
+                repository=REPOSITORY,
+                base_ref=BASE_REF,
+                base_sha=BASE_SHA,
+                head_ref=HEAD_REF,
+                head_sha=HEAD_SHA,
+                draft=False,
+                allow_missing=True,
+                attempts=6,
+                retry_delay_seconds=0.25,
+                sleep=sleep,
+            )
+
+        self.assertEqual(state, {"found": False})
+        fetch.assert_not_called()
+        sleep.assert_not_called()
 
 
 if __name__ == "__main__":

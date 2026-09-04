@@ -7,7 +7,7 @@ The seven Juror caller branches can be tested before merge because they share th
 1. Confirm the shared runtime CI passes and the release commit is reachable from `main`.
 2. Repin both caller workflows in all seven repositories to the release SHA.
 3. Set `JIRA_JS_GITHUB_WORKFLOW_REF` to the common caller feature branch.
-4. Use one dedicated documentation-only `JS-*` ticket per repository. Each ticket must have `codex-ready` and exactly one matching `codex-repo-*` label.
+4. Use one dedicated, harmless but buildable `JS-*` ticket per repository. Each ticket must have `codex-ready` and exactly one matching `codex-repo-*` label. Documentation-only changes are unsuitable for the ready-path test. Confirm from the linked Jenkins console that the pipeline actually started because the legacy `This commit cannot be built` status can also follow a pipeline failure.
 5. Record the Jira audit entry, workflow run, generated PR and ARC scale-set state.
 6. Restore `JIRA_JS_GITHUB_WORKFLOW_REF=master` after the test window.
 
@@ -39,6 +39,7 @@ The report records workflow and job results, runner names, retained artefacts, b
 | Duplicate active request | Idempotency suppresses the second workflow |
 | Successful verification | Bot creates a ready PR, required CI starts, Jira moves to `Peer Review` and adds `pr-ready` |
 | Failed verification | Bot creates a draft PR with evidence, Jira clears running labels without adding `pr-ready` |
+| Jenkins generic error | Workflow records `no-build`, spends no repair call and keeps the PR draft; inspect the Jenkins console to distinguish an ineligible build from a pipeline failure |
 | No changes | No empty PR is created; Jira receives the terminal explanation |
 | Implementation blocked | No empty PR is created; Jira receives the blockers and workflow link |
 
