@@ -47,6 +47,25 @@ class NotifyJiraAutomationTest(unittest.TestCase):
         self.assertFalse(payload["isDraft"])
         self.assertNotIn("status", payload)
 
+    def test_uses_trusted_existing_pr_title_when_supplied(self):
+        args = argparse.Namespace(
+            pr_url="https://github.com/hmcts/juror-api/pull/1",
+            status=None,
+            branch_name="codex/js-123",
+            commit_sha="a" * 40,
+            draft="true",
+            verification_status="failed",
+            message=None,
+        )
+        with self.environment(), patch.dict(
+            os.environ,
+            {"PR_TITLE": "JS-123: Existing pull request"},
+        ):
+            payload = MODULE.build_payload(args)
+        self.assertEqual(payload["prTitle"], "JS-123: Existing pull request")
+        self.assertTrue(payload["isDraft"])
+        self.assertEqual(payload["verificationStatus"], "failed")
+
     def test_builds_blocked_run_payload(self):
         args = argparse.Namespace(
             pr_url=None,

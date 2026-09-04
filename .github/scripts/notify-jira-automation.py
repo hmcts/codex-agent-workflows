@@ -97,7 +97,8 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
     payload.update(
         {
             "prUrl": args.pr_url,
-            "prTitle": f"{payload['issueKey']}: {_required_env('ISSUE_SUMMARY')}",
+            "prTitle": _env("PR_TITLE")
+            or f"{payload['issueKey']}: {_required_env('ISSUE_SUMMARY')}",
             "branchName": args.branch_name,
             "commitSha": args.commit_sha,
             "isDraft": args.draft == "true",

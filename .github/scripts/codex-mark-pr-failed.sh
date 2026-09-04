@@ -117,6 +117,22 @@ if [[ "${NOTIFY_JIRA:-false}" == "true" ]]; then
     )"
     IFS=$'\t' read -r issue_key issue_url <<<"${jira_metadata}"
   fi
+  callback_metadata="$(
+    PR_JSON="${pr_json}" python3 -I - <<'PY'
+import json
+import os
+
+pull_request = json.loads(os.environ["PR_JSON"])
+head = pull_request.get("head") or {}
+values = (pull_request.get("html_url"), pull_request.get("title"), head.get("ref"))
+if not all(isinstance(value, str) and value.strip() for value in values):
+    raise SystemExit("Pull request URL, title, and head branch are required for Jira notification")
+if any("\t" in value or "\n" in value or "\r" in value for value in values):
+    raise SystemExit("Pull request callback metadata contains unsupported control characters")
+print("\t".join(values))
+PY
+  )"
+  IFS=$'\t' read -r pr_url pr_title branch_name <<<"${callback_metadata}"
   env -i \
     "HOME=${sanitized_home}" \
     "PATH=${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}" \
@@ -124,12 +140,16 @@ if [[ "${NOTIFY_JIRA:-false}" == "true" ]]; then
     "LC_ALL=${LC_ALL:-${LANG:-C.UTF-8}}" \
     "ISSUE_KEY=${issue_key}" \
     "ISSUE_URL=${issue_url}" \
+    "PR_TITLE=${pr_title}" \
     "GITHUB_REPOSITORY=${GITHUB_REPOSITORY}" \
     "GITHUB_RUN_ID=${GITHUB_RUN_ID:-}" \
     "GITHUB_SERVER_URL=${GITHUB_SERVER_URL:-https://github.com}" \
     "CODEX_JIRA_PR_NOTIFY_URL=${CODEX_JIRA_PR_NOTIFY_URL:-}" \
     "CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS=${CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS:-10}" \
     python3 -I "${script_dir}/notify-jira-automation.py" \
-      --status failed \
-      --message "${FAILURE_MESSAGE} Pull request #${PR_NUMBER} was returned to draft."
+      --pr-url "${pr_url}" \
+      --branch-name "${branch_name}" \
+      --commit-sha "${EXPECTED_HEAD_SHA}" \
+      --draft true \
+      --verification-status failed
 fi
