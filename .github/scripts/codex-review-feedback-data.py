@@ -15,6 +15,7 @@ from typing import Any
 
 
 TRUSTED_ASSOCIATIONS = {"COLLABORATOR", "MEMBER", "OWNER"}
+TRUSTED_PERMISSIONS = {"write", "maintain", "admin"}
 ACTIONABLE_STATES = {"CHANGES_REQUESTED", "COMMENTED"}
 
 
@@ -46,6 +47,26 @@ def reviewer_identity(review: dict[str, Any]) -> tuple[str, object] | None:
     if isinstance(node_id, str) and node_id.strip():
         return ("node_id", node_id.strip())
     return None
+
+
+def reviewer_login(review: dict[str, Any]) -> str | None:
+    if reviewer_identity(review) is None:
+        return None
+    user = review.get("user")
+    login = user.get("login") if isinstance(user, dict) else None
+    if not isinstance(login, str) or not login.strip():
+        return None
+    return login.strip()
+
+
+def is_trusted_reviewer(
+    review: dict[str, Any], trusted_logins: set[str]
+) -> bool:
+    association = str(review.get("author_association") or "").upper()
+    login = reviewer_login(review)
+    return association in TRUSTED_ASSOCIATIONS or (
+        login is not None and login.casefold() in trusted_logins
+    )
 
 
 def submitted_rank(review: dict[str, Any]) -> tuple[datetime, int] | None:
@@ -100,21 +121,75 @@ def fetch_api_collection(repository: str, pr_number: str, resource: str) -> list
     return records
 
 
+def fetch_repository_permission(repository: str, login: str) -> str | None:
+    completed = subprocess.run(
+        [
+            "gh",
+            "api",
+            f"repos/{repository}/collaborators/{login}/permission",
+            "--jq",
+            ".permission",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        return None
+    permission = completed.stdout.strip().lower()
+    return permission if permission else None
+
+
+def resolve_trusted_logins(
+    repository: str,
+    reviews: list[dict[str, Any]],
+    review_comments: list[dict[str, Any]],
+) -> set[str]:
+    comments_for_review = {
+        review_id
+        for comment in review_comments
+        if (review_id := numeric_id(comment.get("pull_request_review_id"))) is not None
+    }
+    candidate_review_ids: set[int] = set()
+    candidate_logins: set[str] = set()
+
+    for rank, review in latest_submitted_reviews(reviews):
+        review_id = rank[1]
+        state = str(review.get("state") or "").upper()
+        body = str(review.get("body") or "").strip()
+        if state not in ACTIONABLE_STATES or not (body or review_id in comments_for_review):
+            continue
+        candidate_review_ids.add(review_id)
+        if str(review.get("author_association") or "").upper() not in TRUSTED_ASSOCIATIONS:
+            if login := reviewer_login(review):
+                candidate_logins.add(login)
+
+    for comment in review_comments:
+        review_id = numeric_id(comment.get("pull_request_review_id"))
+        association = str(comment.get("author_association") or "").upper()
+        if review_id not in candidate_review_ids or association in TRUSTED_ASSOCIATIONS:
+            continue
+        if login := reviewer_login(comment):
+            candidate_logins.add(login)
+
+    trusted_logins: set[str] = set()
+    for login in sorted(candidate_logins, key=str.casefold):
+        if fetch_repository_permission(repository, login) in TRUSTED_PERMISSIONS:
+            trusted_logins.add(login.casefold())
+    return trusted_logins
+
+
 def comments_by_review_id(
     review_comments: list[dict[str, Any]],
+    trusted_logins: set[str] | None = None,
 ) -> dict[int, list[dict[str, Any]]]:
+    trusted_logins = trusted_logins or set()
     grouped: dict[int, list[dict[str, Any]]] = {}
     for comment in review_comments:
         review_id = numeric_id(comment.get("pull_request_review_id"))
-        user = comment.get("user")
-        association = str(comment.get("author_association") or "").upper()
-        login = user.get("login") if isinstance(user, dict) else None
         if (
             review_id is not None
-            and reviewer_identity(comment) is not None
-            and association in TRUSTED_ASSOCIATIONS
-            and isinstance(login, str)
-            and login.strip()
+            and reviewer_login(comment) is not None
+            and is_trusted_reviewer(comment, trusted_logins)
         ):
             grouped.setdefault(review_id, []).append(comment)
     return grouped
@@ -157,20 +232,22 @@ def latest_submitted_reviews(
 
 
 def select_actionable_review(
-    reviews: list[dict[str, Any]], review_comments: list[dict[str, Any]]
+    reviews: list[dict[str, Any]],
+    review_comments: list[dict[str, Any]],
+    trusted_logins: set[str] | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    grouped_comments = comments_by_review_id(review_comments)
+    trusted_logins = trusted_logins or set()
+    grouped_comments = comments_by_review_id(review_comments, trusted_logins)
     actionable: list[tuple[tuple[datetime, int], dict[str, Any]]] = []
 
     for rank, review in latest_submitted_reviews(reviews):
         review_id = rank[1]
         state = str(review.get("state") or "").upper()
-        association = str(review.get("author_association") or "").upper()
         body = str(review.get("body") or "").strip()
         comments = grouped_comments.get(review_id, [])
         if (
             state in ACTIONABLE_STATES
-            and association in TRUSTED_ASSOCIATIONS
+            and is_trusted_reviewer(review, trusted_logins)
             and (body or comments)
         ):
             actionable.append((rank, review))
@@ -253,7 +330,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         reviews = fetch_api_collection(args.repository, args.pr_number, "reviews")
         comments = fetch_api_collection(args.repository, args.pr_number, "comments")
-        selected_review, selected_comments = select_actionable_review(reviews, comments)
+        trusted_logins = resolve_trusted_logins(args.repository, reviews, comments)
+        selected_review, selected_comments = select_actionable_review(
+            reviews, comments, trusted_logins
+        )
         environment = format_review_environment(selected_review, selected_comments)
 
         write_json_atomic(args.reviews_output, reviews)

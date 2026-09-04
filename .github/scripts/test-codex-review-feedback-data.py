@@ -54,6 +54,17 @@ def completed(
     )
 
 
+def permission_completed(
+    permission: str = "write", *, returncode: int = 0, stderr: str = ""
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        args=["gh"],
+        returncode=returncode,
+        stdout=f"{permission}\n" if permission else "",
+        stderr=stderr,
+    )
+
+
 def comment(
     comment_id: int,
     review_id: int,
@@ -79,6 +90,112 @@ def comment(
 
 
 class ReviewSelectionTests(unittest.TestCase):
+    def test_write_permission_restores_trust_when_membership_is_masked(self):
+        masked_member = review(
+            1,
+            1,
+            "CHANGES_REQUESTED",
+            "2026-08-19T10:00:00Z",
+            login="private-member",
+            association="CONTRIBUTOR",
+        )
+
+        selected, _ = MODULE.select_actionable_review([masked_member], [])
+        self.assertIsNone(selected)
+
+        selected, _ = MODULE.select_actionable_review(
+            [masked_member], [], {"private-member"}
+        )
+        self.assertEqual(selected["id"], 1)
+
+    def test_masked_member_permission_lookup_accepts_only_write_level_access(self):
+        masked_member = review(
+            2,
+            2,
+            "COMMENTED",
+            "2026-08-19T10:00:00Z",
+            login="Private-Member",
+            association="CONTRIBUTOR",
+        )
+
+        for permission, expected in (
+            ("write", {"private-member"}),
+            ("maintain", {"private-member"}),
+            ("admin", {"private-member"}),
+            ("read", set()),
+            ("triage", set()),
+        ):
+            with self.subTest(permission=permission):
+                with mock.patch.object(
+                    MODULE.subprocess,
+                    "run",
+                    return_value=permission_completed(permission),
+                ) as run:
+                    trusted = MODULE.resolve_trusted_logins(
+                        "hmcts/example", [masked_member], []
+                    )
+
+                self.assertEqual(trusted, expected)
+                self.assertEqual(
+                    run.call_args.args[0],
+                    [
+                        "gh",
+                        "api",
+                        "repos/hmcts/example/collaborators/Private-Member/permission",
+                        "--jq",
+                        ".permission",
+                    ],
+                )
+
+    def test_permission_lookup_failure_rejects_masked_member(self):
+        masked_member = review(
+            3,
+            3,
+            "COMMENTED",
+            "2026-08-19T10:00:00Z",
+            login="private-member",
+            association="CONTRIBUTOR",
+        )
+        with mock.patch.object(
+            MODULE.subprocess,
+            "run",
+            return_value=permission_completed(
+                "", returncode=1, stderr="HTTP 404: Not Found"
+            ),
+        ):
+            trusted = MODULE.resolve_trusted_logins(
+                "hmcts/example", [masked_member], []
+            )
+
+        self.assertEqual(trusted, set())
+
+    def test_masked_inline_comment_requires_write_permission(self):
+        selected_review = review(
+            4,
+            4,
+            "COMMENTED",
+            "2026-08-19T10:00:00Z",
+            body="trusted review body",
+        )
+        masked_comment = comment(
+            401,
+            4,
+            5,
+            body="private member inline feedback",
+            login="private-member",
+            association="CONTRIBUTOR",
+        )
+
+        _, comments = MODULE.select_actionable_review(
+            [selected_review], [masked_comment]
+        )
+        self.assertEqual(comments, [])
+
+        _, comments = MODULE.select_actionable_review(
+            [selected_review], [masked_comment], {"private-member"}
+        )
+        self.assertEqual([item["id"] for item in comments], [401])
+
     def test_approval_supersedes_change_request_for_same_stable_reviewer(self):
         reviews = [
             review(10, 7, "CHANGES_REQUESTED", "2026-08-19T10:00:00Z"),
