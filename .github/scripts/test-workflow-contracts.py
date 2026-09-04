@@ -439,11 +439,27 @@ class WorkflowContractTests(unittest.TestCase):
             workflow.read_text(encoding="utf-8")
             for workflow in (REVIEW_GENERATE_WORKFLOW, REVIEW_REPAIR_WORKFLOW)
         )
-        self.assertEqual(content.count("trusted-check-codex-pr-safety.rb"), 6)
+        self.assertEqual(content.count("trusted-check-codex-pr-safety.rb"), 4)
         self.assertEqual(
             content.count("trusted-codex-prepare-policy-candidate.sh"), 6
         )
         self.assertEqual(content.count("TRUSTED_POLICY_PREPARER_PATH:"), 2)
+        self.assertEqual(
+            content.count("trusted-safety/lib/codex_workflow_safety"), 4
+        )
+        self.assertEqual(
+            content.count(
+                ".github/scripts/lib/codex_workflow_safety/."
+            ),
+            2,
+        )
+        self.assertEqual(
+            content.count(
+                "codex-review-verification-source/trusted-safety/"
+                "trusted-check-codex-pr-safety.rb"
+            ),
+            2,
+        )
         self.assertNotIn("trusted-check-codex-pr-safety.py", content)
 
     def test_review_verifier_restores_policy_preparer_executable_permission(self):
