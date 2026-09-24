@@ -3,6 +3,17 @@ name: Codex published PR verification
 on:
   workflow_call:
     inputs:
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       node_version:
         required: false
         default: "22"

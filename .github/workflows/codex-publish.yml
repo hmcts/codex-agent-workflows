@@ -6,6 +6,17 @@ on:
       issueKey:
         required: true
         type: string
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       summary:
         required: true
         type: string
@@ -176,6 +187,7 @@ jobs:
           retention-days: 1
 
   publish-draft-pr:
+    environment: ${{ inputs.publisher_environment }}
     needs: prepare-draft-publication
     if: always() && needs.prepare-draft-publication.outputs.available == 'true'
     runs-on: ubuntu-latest
@@ -341,6 +353,7 @@ jobs:
             --verification-status failed
 
   publish-pr:
+    environment: ${{ inputs.publisher_environment }}
     if: |
       always() &&
       inputs.has_changes == 'true' &&
@@ -519,6 +532,7 @@ jobs:
           exit 1
 
   codex-prepublication-terminal-failed:
+    environment: ${{ inputs.publisher_environment }}
     needs: [prepare-draft-publication, publish-draft-pr, publish-pr]
     if: |
       always() &&

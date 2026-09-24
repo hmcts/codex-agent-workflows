@@ -25,6 +25,17 @@ on:
         required: false
         default: ''
         type: string
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       runner_group:
         required: true
         type: string
@@ -112,6 +123,7 @@ jobs:
           retention-days: 1
 
   codex-generate-action:
+    environment: ${{ inputs.model_environment }}
     runs-on:
       group: ${{ inputs.runner_group }}
       labels: ${{ inputs.runner_label }}
@@ -247,6 +259,7 @@ jobs:
           retention-days: 1
 
   codex-generation-terminal-failed:
+    environment: ${{ inputs.publisher_environment }}
     needs: [codex-generate-action, codex-generate]
     if: |
       always() &&
@@ -282,6 +295,7 @@ jobs:
         run: exit 1
 
   codex-no-changes:
+    environment: ${{ inputs.publisher_environment }}
     needs: codex-generate
     if: always() && needs.codex-generate.result == 'success' && needs.codex-generate.outputs.has_changes == 'false'
     runs-on: ubuntu-latest

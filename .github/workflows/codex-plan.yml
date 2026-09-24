@@ -25,6 +25,17 @@ on:
         required: false
         default: ''
         type: string
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       runner_group:
         required: true
         type: string
@@ -60,6 +71,7 @@ on:
 
 jobs:
   codex-plan-action:
+    environment: ${{ inputs.model_environment }}
     runs-on:
       group: ${{ inputs.runner_group }}
       labels: ${{ inputs.runner_label }}
@@ -182,6 +194,7 @@ jobs:
           } >>"${GITHUB_STEP_SUMMARY}"
 
   codex-plan-failed:
+    environment: ${{ inputs.publisher_environment }}
     needs: [codex-plan-action, validate-codex-plan]
     if: >-
       ${{
@@ -231,6 +244,7 @@ jobs:
           exit 1
 
   codex-plan-blocked:
+    environment: ${{ inputs.publisher_environment }}
     needs: validate-codex-plan
     if: needs.validate-codex-plan.outputs.ready_to_implement == 'false'
     runs-on: ubuntu-latest
