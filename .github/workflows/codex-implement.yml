@@ -104,7 +104,23 @@ on:
         required: false
 
 jobs:
+  validate-runner-target:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout shared workflow repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Refuse an unexpected runner group or label
+        env:
+          RUNNER_GROUP: ${{ inputs.runner_group }}
+          RUNNER_LABEL: ${{ inputs.runner_label }}
+        run: python3 -I .github/scripts/validate-runner-target.py
+
   plan:
+    needs: validate-runner-target
     permissions:
       contents: read
     uses: ./.github/workflows/codex-plan.yml
