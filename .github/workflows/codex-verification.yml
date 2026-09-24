@@ -25,6 +25,9 @@ on:
         required: false
         default: ''
         type: string
+      runner_group:
+        required: true
+        type: string
       runner_label:
         required: true
         type: string
@@ -98,6 +101,7 @@ jobs:
       assignee: ${{ inputs.assignee }}
       issueUrl: ${{ inputs.issueUrl }}
       initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
+      runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
       java_version: ${{ inputs.java_version }}
@@ -127,6 +131,7 @@ jobs:
       assignee: ${{ inputs.assignee }}
       issueUrl: ${{ inputs.issueUrl }}
       initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
+      runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
       java_version: ${{ inputs.java_version }}
@@ -156,6 +161,7 @@ jobs:
       assignee: ${{ inputs.assignee }}
       issueUrl: ${{ inputs.issueUrl }}
       initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
+      runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
       java_version: ${{ inputs.java_version }}

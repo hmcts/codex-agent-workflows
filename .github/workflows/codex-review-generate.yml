@@ -3,6 +3,9 @@ name: Codex review generation and verification
 on:
   workflow_call:
     inputs:
+      runner_group:
+        required: true
+        type: string
       runner_label:
         required: true
         type: string
@@ -60,7 +63,9 @@ permissions:
 jobs:
   codex-review-generate-action:
     if: inputs.is_codex_pr == 'true'
-    runs-on: ${{ inputs.runner_label }}
+    runs-on:
+      group: ${{ inputs.runner_group }}
+      labels: ${{ inputs.runner_label }}
     permissions:
       contents: read
       pull-requests: read

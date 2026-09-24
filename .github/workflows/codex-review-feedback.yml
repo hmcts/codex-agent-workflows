@@ -3,6 +3,10 @@ name: Codex PR Review Feedback
 on:
   workflow_call:
     inputs:
+      runner_group:
+        description: Organisation runner group containing the scale set
+        required: true
+        type: string
       runner_label:
         description: Repository-scoped ARC runner scale-set label
         required: true
@@ -81,6 +85,7 @@ jobs:
       issues: read
     uses: ./.github/workflows/codex-review-generate.yml
     with:
+      runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
       java_version: ${{ inputs.java_version }}
@@ -123,6 +128,7 @@ jobs:
       issues: read
     uses: ./.github/workflows/codex-review-repair.yml
     with:
+      runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
       java_version: ${{ inputs.java_version }}
