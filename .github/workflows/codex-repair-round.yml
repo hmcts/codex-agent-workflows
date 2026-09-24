@@ -25,6 +25,17 @@ on:
         required: false
         default: ''
         type: string
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       runner_group:
         required: true
         type: string
@@ -92,6 +103,7 @@ on:
 
 jobs:
   repair-action:
+    environment: ${{ inputs.model_environment }}
     runs-on:
       group: ${{ inputs.runner_group }}
       labels: ${{ inputs.runner_label }}
