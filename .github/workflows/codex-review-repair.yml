@@ -3,6 +3,9 @@ name: Codex review external repair
 on:
   workflow_call:
     inputs:
+      runner_group:
+        required: true
+        type: string
       runner_label:
         required: true
         type: string
@@ -164,7 +167,9 @@ jobs:
   codex-review-external-repair-action:
     needs: prepare-published-review-repair-source
     if: always() && inputs.initial_passed == 'false'
-    runs-on: ${{ inputs.runner_label }}
+    runs-on:
+      group: ${{ inputs.runner_group }}
+      labels: ${{ inputs.runner_label }}
     timeout-minutes: 120
     permissions:
       contents: read

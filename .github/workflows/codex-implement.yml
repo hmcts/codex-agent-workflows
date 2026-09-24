@@ -32,6 +32,10 @@ on:
         required: false
         default: ''
         type: string
+      runner_group:
+        description: Organisation runner group containing the scale set
+        required: true
+        type: string
       runner_label:
         description: Repository-scoped ARC runner scale-set label
         required: true
@@ -101,6 +105,7 @@ jobs:
       assignee: ${{ inputs.assignee }}
       issueUrl: ${{ inputs.issueUrl }}
       initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
+      runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
       jira_notify_timeout_seconds: ${{ inputs.jira_notify_timeout_seconds }}
@@ -122,6 +127,7 @@ jobs:
       assignee: ${{ inputs.assignee }}
       issueUrl: ${{ inputs.issueUrl }}
       initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
+      runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
       jira_notify_timeout_seconds: ${{ inputs.jira_notify_timeout_seconds }}
@@ -148,6 +154,7 @@ jobs:
       assignee: ${{ inputs.assignee }}
       issueUrl: ${{ inputs.issueUrl }}
       initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
+      runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
       java_version: ${{ inputs.java_version }}
@@ -224,6 +231,7 @@ jobs:
       assignee: ${{ inputs.assignee }}
       issueUrl: ${{ inputs.issueUrl }}
       initiatorDisplayName: ${{ inputs.initiatorDisplayName }}
+      runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
       java_version: ${{ inputs.java_version }}
