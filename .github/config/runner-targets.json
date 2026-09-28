@@ -1,0 +1,16 @@
+{
+  "_comment": "Runner groups and the scale-set labels each may schedule. A caller asking for any other pair is refused before the model runs. Keep in step with infra/arc/arc.tfvars.example in justice-coe/codex-runner-terraform and with each group's workflow access list.",
+  "appreg-codex": [
+    "codex-pilot-azure-aks",
+    "codex-frontend-azure-aks"
+  ],
+  "juror-codex": [
+    "codex-juror-api-aks",
+    "codex-juror-bureau-aks",
+    "codex-juror-er-portal-aks",
+    "codex-juror-pnc-aks",
+    "codex-juror-public-aks",
+    "codex-juror-scheduler-api-aks",
+    "codex-juror-scheduler-execution-aks"
+  ]
+}

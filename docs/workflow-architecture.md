@@ -60,13 +60,13 @@ flowchart LR
 | Workflow | Name | Role | Jobs | Calls |
 |---|---|---|---:|---|
 | `codex-generate.yml` | Codex generation stage | Internal reusable stage | 5 | - |
-| `codex-implement.yml` | Codex implementation | Public entry point | 6 | `codex-generate.yml`, `codex-plan.yml`, `codex-post-repair.yml`, `codex-post-verify.yml`, `codex-publish.yml`, `codex-verification.yml` |
+| `codex-implement.yml` | Codex implementation | Public entry point | 7 | `codex-generate.yml`, `codex-plan.yml`, `codex-post-repair.yml`, `codex-post-verify.yml`, `codex-publish.yml`, `codex-verification.yml` |
 | `codex-plan.yml` | Codex plan stage | Internal reusable stage | 4 | - |
 | `codex-post-repair.yml` | Codex published PR repair | Internal reusable stage | 7 | - |
 | `codex-post-verify.yml` | Codex published PR verification | Internal reusable stage | 2 | - |
 | `codex-publish.yml` | Codex PR publication | Internal reusable stage | 5 | - |
 | `codex-repair-round.yml` | Codex repair and verification round | Internal reusable stage | 3 | - |
-| `codex-review-feedback.yml` | Codex PR Review Feedback | Public entry point | 5 | `codex-review-generate.yml`, `codex-review-intake.yml`, `codex-review-publish.yml`, `codex-review-repair.yml`, `codex-review-terminal.yml` |
+| `codex-review-feedback.yml` | Codex PR Review Feedback | Public entry point | 6 | `codex-review-generate.yml`, `codex-review-intake.yml`, `codex-review-publish.yml`, `codex-review-repair.yml`, `codex-review-terminal.yml` |
 | `codex-review-generate.yml` | Codex review generation and verification | Internal reusable stage | 4 | - |
 | `codex-review-intake.yml` | Codex review intake | Internal reusable stage | 1 | - |
 | `codex-review-publish.yml` | Codex review publication | Internal reusable stage | 2 | - |
