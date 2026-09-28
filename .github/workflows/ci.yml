@@ -53,6 +53,9 @@ jobs:
             ruby -c "${source}"
           done
 
+      - name: Check shared workflow trust contract
+        run: ruby .github/scripts/check-shared-workflow-trust.rb
+
       - name: Lint GitHub Actions workflows
         # actionlint 1.7.x does not yet recognise GitHub's $/ self-repository
         # action syntax. Contract tests restrict it to the shared runtime.
