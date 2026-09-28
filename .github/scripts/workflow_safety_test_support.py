@@ -28,7 +28,7 @@ def named_workflow(name: str, body: str, *, trigger: str) -> str:
 def trusted_review_wrapper(
     *, pin: str | None = None, sonar_host_url: str = "https://sonarcloud.io"
 ) -> str:
-    pin = pin or "1" * 40
+    pin = pin or "main"
     return f"""name: Codex PR Review
 on:
   issue_comment:
@@ -46,6 +46,7 @@ jobs:
       issues: read
     uses: hmcts/codex-agent-workflows/.github/workflows/codex-review-feedback.yml@{pin}
     with:
+      runner_group: juror-codex
       runner_label: codex-juror-api-aks
       java_version: "17"
       github_app_client_id: ${{{{ vars.CODEX_GITHUB_APP_CLIENT_ID }}}}

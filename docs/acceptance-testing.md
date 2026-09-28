@@ -1,11 +1,11 @@
 # Juror acceptance testing
 
-The seven Juror caller branches can be tested before merge because they share the branch name `codex/update-agent-workflows-<release>`. The shared runtime itself must first be released from the default branch and every caller must pin that immutable release SHA.
+The seven Juror caller branches can be tested before merge because they share the branch name `codex/use-agent-workflows-main`. Callers reference the shared workflows at `main`, so the shared change under test must already be merged there.
 
 ## Controlled pre-merge run
 
 1. Confirm the shared runtime CI passes and the release commit is reachable from `main`.
-2. Repin both caller workflows in all seven repositories to the release SHA.
+2. Confirm both caller workflows in all seven repositories reference the shared workflows at `main`.
 3. Set `JIRA_JS_GITHUB_WORKFLOW_REF` to the common caller feature branch.
 4. Use one dedicated, harmless but buildable `JS-*` ticket per repository. Each ticket must have `codex-ready` and exactly one matching `codex-repo-*` label. Documentation-only changes are unsuitable for the ready-path test. Confirm from the linked Jenkins console that the pipeline actually started because the legacy `This commit cannot be built` status can also follow a pipeline failure.
 5. Record the Jira audit entry, workflow run, generated PR and ARC scale-set state.

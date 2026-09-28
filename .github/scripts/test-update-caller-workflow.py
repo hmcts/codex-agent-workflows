@@ -17,7 +17,7 @@ assert SPEC.loader
 SPEC.loader.exec_module(MODULE)
 
 OLD_SHA = "1" * 40
-NEW_SHA = "2" * 40
+RELEASE_REF = "main"
 
 
 def dispatch_caller(*, include_notify: bool = True, include_summary: bool = True) -> str:
@@ -73,24 +73,39 @@ jobs:
 class UpdateCallerWorkflowTests(unittest.TestCase):
     def test_updates_dispatch_pin_with_exact_secret_set(self):
         updated = MODULE.update_caller(
-            dispatch_caller(), "codex_jira_dispatch.yml", NEW_SHA
+            dispatch_caller(), "codex_jira_dispatch.yml", RELEASE_REF
         )
-        self.assertIn(f"codex-implement.yml@{NEW_SHA}", updated)
+        self.assertIn(f"codex-implement.yml@{RELEASE_REF}", updated)
         self.assertEqual(updated.count("CODEX_JIRA_PR_NOTIFY_URL"), 2)
 
     def test_updates_safe_review_pin_with_exact_secret_set(self):
         updated = MODULE.update_caller(
-            review_caller(), "codex_pr_review.yml", NEW_SHA
+            review_caller(), "codex_pr_review.yml", RELEASE_REF
         )
-        self.assertIn(f"codex-review-feedback.yml@{NEW_SHA}", updated)
+        self.assertIn(f"codex-review-feedback.yml@{RELEASE_REF}", updated)
         self.assertEqual(updated.count("CODEX_JIRA_PR_NOTIFY_URL"), 2)
 
     def test_migration_is_idempotent(self):
         first = MODULE.update_caller(
-            dispatch_caller(include_notify=True), "codex_jira_dispatch.yml", NEW_SHA
+            dispatch_caller(include_notify=True), "codex_jira_dispatch.yml", RELEASE_REF
         )
-        second = MODULE.update_caller(first, "codex_jira_dispatch.yml", NEW_SHA)
+        second = MODULE.update_caller(first, "codex_jira_dispatch.yml", RELEASE_REF)
         self.assertEqual(second, first)
+
+    def test_moves_a_commit_pinned_caller_to_main_only(self):
+        updated = MODULE.update_caller(dispatch_caller(), "codex_jira_dispatch.yml")
+        self.assertIn("codex-implement.yml@main\n", updated)
+        self.assertNotIn(OLD_SHA, updated)
+
+        for reference in ("2" * 40, "release", "v1"):
+            with self.subTest(reference=reference):
+                with self.assertRaisesRegex(
+                    MODULE.CallerContractError,
+                    "callers must reference the shared workflows at main",
+                ):
+                    MODULE.update_caller(
+                        dispatch_caller(), "codex_jira_dispatch.yml", reference
+                    )
 
     def test_rejects_missing_required_input(self):
         with self.assertRaisesRegex(
@@ -99,7 +114,7 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
             MODULE.update_caller(
                 dispatch_caller(include_summary=False),
                 "codex_jira_dispatch.yml",
-                NEW_SHA,
+                RELEASE_REF,
             )
 
     def test_rejects_wrong_shared_workflow(self):
@@ -109,7 +124,7 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
                     "codex-review-feedback.yml", "codex-implement.yml"
                 ),
                 "codex_pr_review.yml",
-                NEW_SHA,
+                RELEASE_REF,
             )
 
     def test_does_not_borrow_with_block_from_later_job(self):
@@ -117,7 +132,7 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
         caller += "  later:\n    runs-on: ubuntu-latest\n    with:\n      summary: borrowed\n"
 
         with self.assertRaisesRegex(MODULE.CallerContractError, "missing with: block"):
-            MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+            MODULE.update_caller(caller, "codex_jira_dispatch.yml", RELEASE_REF)
 
     def test_rejects_missing_required_secret(self):
         with self.assertRaisesRegex(
@@ -127,7 +142,7 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
             MODULE.update_caller(
                 dispatch_caller(include_notify=False),
                 "codex_jira_dispatch.yml",
-                NEW_SHA,
+                RELEASE_REF,
             )
 
     def test_rejects_one_or_multiple_extra_secrets(self):
@@ -148,7 +163,7 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
                     "caller supplies unsupported secrets: " + ", ".join(extras),
                 ):
                     MODULE.update_caller(
-                        caller, "codex_jira_dispatch.yml", NEW_SHA
+                        caller, "codex_jira_dispatch.yml", RELEASE_REF
                     )
 
     def test_review_caller_requires_safe_issue_comment_gate(self):
@@ -173,7 +188,7 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
                     "review caller",
                 ):
                     MODULE.update_caller(
-                        caller, "codex_pr_review.yml", NEW_SHA
+                        caller, "codex_pr_review.yml", RELEASE_REF
                     )
 
     def test_does_not_borrow_secrets_block_from_later_job(self):
@@ -186,7 +201,7 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(MODULE.CallerContractError, "missing secrets: block"):
-            MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+            MODULE.update_caller(caller, "codex_jira_dispatch.yml", RELEASE_REF)
 
     def test_rejects_wrong_required_secret_mapping(self):
         caller = dispatch_caller().replace(
@@ -197,7 +212,7 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
             MODULE.CallerContractError,
             r"CODEX_JIRA_PR_NOTIFY_URL must map exactly to \$\{\{ secrets.CODEX_JIRA_PR_NOTIFY_URL \}\}",
         ):
-            MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+            MODULE.update_caller(caller, "codex_jira_dispatch.yml", RELEASE_REF)
 
     def test_rejects_empty_required_secret_mapping(self):
         caller = dispatch_caller().replace(
@@ -208,7 +223,7 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(
             MODULE.CallerContractError, "CODEX_OPENAI_API_KEY must map exactly"
         ):
-            MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+            MODULE.update_caller(caller, "codex_jira_dispatch.yml", RELEASE_REF)
 
 
 def release_workflow(*, with_runner_group: bool) -> str:
@@ -270,11 +285,11 @@ class RunnerGroupTests(unittest.TestCase):
                 updated = MODULE.update_caller(
                     caller,
                     filename,
-                    NEW_SHA,
+                    RELEASE_REF,
                     requires_runner_group=True,
                     runner_group="juror-codex",
                 )
-                self.assertIn(f"{workflow}@{NEW_SHA}", updated)
+                self.assertIn(f"{workflow}@{RELEASE_REF}", updated)
                 self.assertIn(
                     "      runner_label: codex-juror-api-aks\n"
                     "      runner_group: juror-codex\n",
@@ -286,14 +301,14 @@ class RunnerGroupTests(unittest.TestCase):
         first = MODULE.update_caller(
             dispatch_caller(),
             "codex_jira_dispatch.yml",
-            NEW_SHA,
+            RELEASE_REF,
             requires_runner_group=True,
             runner_group="juror-codex",
         )
         second = MODULE.update_caller(
             first,
             "codex_jira_dispatch.yml",
-            NEW_SHA,
+            RELEASE_REF,
             requires_runner_group=True,
             runner_group="juror-codex",
         )
@@ -304,11 +319,11 @@ class RunnerGroupTests(unittest.TestCase):
         updated = MODULE.update_caller(
             caller,
             "codex_jira_dispatch.yml",
-            NEW_SHA,
+            RELEASE_REF,
             requires_runner_group=True,
             runner_group="juror-codex",
         )
-        self.assertEqual(updated, caller.replace(OLD_SHA, NEW_SHA))
+        self.assertEqual(updated, caller.replace(OLD_SHA, RELEASE_REF))
 
     def test_rejects_a_different_runner_group(self):
         caller = with_runner_group(dispatch_caller(), "appreg-codex")
@@ -319,7 +334,7 @@ class RunnerGroupTests(unittest.TestCase):
             MODULE.update_caller(
                 caller,
                 "codex_jira_dispatch.yml",
-                NEW_SHA,
+                RELEASE_REF,
                 requires_runner_group=True,
                 runner_group="juror-codex",
             )
@@ -333,7 +348,7 @@ class RunnerGroupTests(unittest.TestCase):
                     MODULE.update_caller(
                         dispatch_caller(),
                         "codex_jira_dispatch.yml",
-                        NEW_SHA,
+                        RELEASE_REF,
                         requires_runner_group=True,
                         runner_group=group,
                     )
@@ -343,13 +358,13 @@ class RunnerGroupTests(unittest.TestCase):
         with self.assertRaisesRegex(
             MODULE.CallerContractError, "does not accept runner_group"
         ):
-            MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+            MODULE.update_caller(caller, "codex_jira_dispatch.yml", RELEASE_REF)
 
     def test_does_not_add_runner_group_for_a_release_without_it(self):
         updated = MODULE.update_caller(
             dispatch_caller(),
             "codex_jira_dispatch.yml",
-            NEW_SHA,
+            RELEASE_REF,
             requires_runner_group=False,
             runner_group="juror-codex",
         )
@@ -381,8 +396,6 @@ class RunnerGroupTests(unittest.TestCase):
                             str(SCRIPT),
                             "--workflow",
                             f".github/workflows/{name}",
-                            "--release-sha",
-                            NEW_SHA,
                             "--input",
                             str(source),
                             "--output",

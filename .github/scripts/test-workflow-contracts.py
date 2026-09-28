@@ -183,11 +183,11 @@ class WorkflowContractTests(unittest.TestCase):
     def test_rollout_requires_post_onboarding_reviewed_release_dispatch(self):
         content = ROLLOUT.read_text(encoding="utf-8")
         merge_callers = content.index("Merge the seven caller onboarding PRs")
-        dispatch = content.index("manually dispatch `Update caller workflow pins`")
+        dispatch = content.index("manually dispatch `Update caller workflows`")
         activation = content.index("Enable the Jira dispatch rule")
         self.assertLess(merge_callers, dispatch)
         self.assertLess(dispatch, activation)
-        self.assertIn("pin exactly the recorded release SHA", content)
+        self.assertIn("reference the shared workflows at `main` before enabling any trigger", content)
 
     def test_rollout_blocks_all_callers_until_live_master_is_credential_free(self):
         content = ROLLOUT.read_text(encoding="utf-8")
@@ -227,7 +227,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("only `issue_comment` with exactly `types: [created]`", content)
         self.assertIn("`pull_request_review` and `pull_request_review_comment` are not accepted", content)
         self.assertIn("whose `author_association` is exactly one of", content)
-        self.assertIn("same reviewed 40-character SHA", content)
+        self.assertIn("the same reference as the trusted default-branch wrapper", content)
         self.assertIn("exactly `https://sonarcloud.io`", content)
         self.assertIn("cannot contain executable steps", content)
         self.assertIn("`workflow_dispatch` requires a trusted operator", content)
@@ -647,6 +647,22 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertLess(open_pr, stale_reset)
         self.assertLess(stale_reset, branch_create)
         self.assertIn("-F force=true", content)
+
+    def test_release_updater_gates_the_changed_caller_before_raising_a_pr(self):
+        content = UPDATER_WORKFLOW.read_text(encoding="utf-8")
+        overlay = content.index(
+            'cp "${update_dir}/$(basename "${path}").output" "${gate_root}/${path}"'
+        )
+        gate = content.index("ruby .github/scripts/check-codex-pr-safety.rb")
+        open_pr = content.index('existing="$(gh pr list')
+        branch_create = content.index(
+            'gh api --method POST "repos/${TARGET_REPOSITORY}/git/refs"'
+        )
+        self.assertLess(overlay, gate)
+        self.assertLess(gate, open_pr)
+        self.assertLess(gate, branch_create)
+        self.assertIn("contents/.github/workflows/${shared}?ref=main", content)
+        self.assertNotIn("release_sha", content)
 
 
 if __name__ == "__main__":

@@ -39,7 +39,10 @@ PROTECTED_EVENT_FILTERS = {
 }.freeze
 TRUSTED_REVIEW_IF = "${{ github.event.issue.pull_request && github.event.comment.body == '/codex-review' && contains(fromJSON('[\"COLLABORATOR\",\"MEMBER\",\"OWNER\"]'), github.event.comment.author_association) }}"
 TRUSTED_REVIEW_INPUTS = %w[
+  runner_group
   runner_label
+  model_environment
+  publisher_environment
   node_version
   java_version
   github_app_client_id
@@ -51,6 +54,7 @@ TRUSTED_REVIEW_INPUTS = %w[
   jira_notify_timeout_seconds
 ].freeze
 REQUIRED_TRUSTED_REVIEW_INPUTS = %w[
+  runner_group
   runner_label
   github_app_client_id
   sonar_host_url
@@ -62,7 +66,7 @@ TRUSTED_REVIEW_SECRETS = %w[
   CODEX_JIRA_PR_NOTIFY_URL
 ].freeze
 TRUSTED_REVIEW_PREFIX = "hmcts/codex-agent-workflows/.github/workflows/codex-review-feedback.yml@"
-TRUSTED_REVIEW_REFERENCE = %r{\Ahmcts/codex-agent-workflows/\.github/workflows/codex-review-feedback\.yml@[0-9a-f]{40}\z}.freeze
+TRUSTED_REVIEW_REFERENCE = %r{\Ahmcts/codex-agent-workflows/\.github/workflows/codex-review-feedback\.yml@main\z}.freeze
 SECRET_EXPRESSION = /\$\{\{.*?\bsecrets\b.*?\}\}/im.freeze
 GITHUB_EXPRESSION = /\$\{\{/.freeze
 GLOB_MAGIC = /[*?\[\]{}+@]/.freeze
