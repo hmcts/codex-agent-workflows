@@ -87,7 +87,7 @@ These exclusions do not authorize a trusted workflow to turn arbitrary event fie
 6. Merge the seven caller onboarding PRs.
 7. Run the immutable shared `check-codex-pr-safety.rb` from the recorded release SHA against the live `master` checkout of all seven callers. All seven exact checks must pass before activation; a local approximation, documentation exception or check against an onboarding branch is not sufficient.
 8. After all wrappers exist on each caller's `master`, manually dispatch `Update caller workflow pins` with the recorded release SHA. This post-onboarding dispatch is mandatory even if the scheduled retry has already run.
-9. Review and merge every caller pin-update PR raised by the updater. A scheduled retry runs every six hours so a repository that previously returned an explicit wrapper 404 is reconsidered after onboarding.
+9. Review and merge every caller pin-update PR raised by the updater. A scheduled retry runs every six hours so a repository that previously returned an explicit wrapper 404 is reconsidered after onboarding. When the release's shared workflows declare `runner_group`, the same PR adds `runner_group: juror-codex` to both wrappers, because a wrapper cannot pass that input to a release that does not declare it.
 10. Verify both wrappers in all seven callers pin exactly the recorded release SHA before enabling any trigger. A caller with a missing wrapper, a different pin or a failed updater matrix job is not accepted for activation.
 11. Merge and deploy the Azure Function routing change.
 12. Configure the JS Jira Automation webhook URL and secret in the Function App.
