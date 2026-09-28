@@ -41,6 +41,7 @@ jobs:
     env:
       TARGET_REPOSITORY: ${{ matrix.repository }}
       RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
+      RUNNER_GROUP: juror-codex
 
     steps:
       - name: Checkout shared workflow repository
@@ -96,7 +97,12 @@ jobs:
           branch="codex/update-agent-workflows-${RELEASE_SHA:0:12}"
           base_sha="$(gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${TARGET_BRANCH}" --jq .object.sha)"
           update_dir="$RUNNER_TEMP/caller-update"
-          mkdir -p "${update_dir}"
+          release_dir="${update_dir}/release"
+          mkdir -p "${release_dir}"
+          for shared in codex-implement.yml codex-review-feedback.yml; do
+            gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/${shared}?ref=${RELEASE_SHA}" \
+              --jq .content | base64 --decode >"${release_dir}/${shared}"
+          done
           changed=false
           for path in .github/workflows/codex_jira_dispatch.yml .github/workflows/codex_pr_review.yml; do
             name="$(basename "${path}")"
@@ -123,7 +129,9 @@ jobs:
               --workflow "${path}" \
               --release-sha "${RELEASE_SHA}" \
               --input "${input_path}" \
-              --output "${output_path}"
+              --output "${output_path}" \
+              --release-workflows "${release_dir}" \
+              --runner-group "${RUNNER_GROUP}"
             printf '%s\n' "${blob_sha}" >"${update_dir}/${name}.sha"
             if ! cmp -s "${input_path}" "${output_path}"; then
               changed=true

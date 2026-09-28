@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -206,6 +209,198 @@ class UpdateCallerWorkflowTests(unittest.TestCase):
             MODULE.CallerContractError, "CODEX_OPENAI_API_KEY must map exactly"
         ):
             MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+
+
+def release_workflow(*, with_runner_group: bool) -> str:
+    runner_group = (
+        "      runner_group:\n"
+        "        required: true\n"
+        "        type: string\n"
+        if with_runner_group
+        else ""
+    )
+    # The job below passes runner_group at the same indentation as an input
+    # declaration; only on.workflow_call.inputs may count as the contract.
+    return (
+        "name: Codex implementation\n"
+        "\n"
+        "on:\n"
+        "  workflow_call:\n"
+        "    inputs:\n"
+        "      issueKey:\n"
+        "        required: true\n"
+        "        type: string\n"
+        f"{runner_group}"
+        "      runner_label:\n"
+        "        required: true\n"
+        "        type: string\n"
+        "\n"
+        "jobs:\n"
+        "  plan:\n"
+        "    uses: ./.github/workflows/codex-plan.yml\n"
+        "    with:\n"
+        "      runner_group: ${{ inputs.runner_group }}\n"
+        "      runner_label: ${{ inputs.runner_label }}\n"
+    )
+
+
+def with_runner_group(caller: str, value: str) -> str:
+    return caller.replace(
+        "      runner_label: codex-juror-api-aks\n",
+        f"      runner_label: codex-juror-api-aks\n      runner_group: {value}\n",
+        1,
+    )
+
+
+class RunnerGroupTests(unittest.TestCase):
+    def test_detects_runner_group_only_in_workflow_call_inputs(self):
+        self.assertTrue(
+            MODULE.release_requires_runner_group(release_workflow(with_runner_group=True))
+        )
+        self.assertFalse(
+            MODULE.release_requires_runner_group(release_workflow(with_runner_group=False))
+        )
+
+    def test_adds_runner_group_after_runner_label_when_release_requires_it(self):
+        for caller, filename, workflow in (
+            (dispatch_caller(), "codex_jira_dispatch.yml", "codex-implement.yml"),
+            (review_caller(), "codex_pr_review.yml", "codex-review-feedback.yml"),
+        ):
+            with self.subTest(filename=filename):
+                updated = MODULE.update_caller(
+                    caller,
+                    filename,
+                    NEW_SHA,
+                    requires_runner_group=True,
+                    runner_group="juror-codex",
+                )
+                self.assertIn(f"{workflow}@{NEW_SHA}", updated)
+                self.assertIn(
+                    "      runner_label: codex-juror-api-aks\n"
+                    "      runner_group: juror-codex\n",
+                    updated,
+                )
+                self.assertEqual(updated.count("runner_group:"), 1)
+
+    def test_runner_group_insertion_is_idempotent(self):
+        first = MODULE.update_caller(
+            dispatch_caller(),
+            "codex_jira_dispatch.yml",
+            NEW_SHA,
+            requires_runner_group=True,
+            runner_group="juror-codex",
+        )
+        second = MODULE.update_caller(
+            first,
+            "codex_jira_dispatch.yml",
+            NEW_SHA,
+            requires_runner_group=True,
+            runner_group="juror-codex",
+        )
+        self.assertEqual(second, first)
+
+    def test_keeps_a_matching_quoted_runner_group(self):
+        caller = with_runner_group(dispatch_caller(), "'juror-codex'")
+        updated = MODULE.update_caller(
+            caller,
+            "codex_jira_dispatch.yml",
+            NEW_SHA,
+            requires_runner_group=True,
+            runner_group="juror-codex",
+        )
+        self.assertEqual(updated, caller.replace(OLD_SHA, NEW_SHA))
+
+    def test_rejects_a_different_runner_group(self):
+        caller = with_runner_group(dispatch_caller(), "appreg-codex")
+        with self.assertRaisesRegex(
+            MODULE.CallerContractError,
+            "runner_group appreg-codex does not match the expected juror-codex",
+        ):
+            MODULE.update_caller(
+                caller,
+                "codex_jira_dispatch.yml",
+                NEW_SHA,
+                requires_runner_group=True,
+                runner_group="juror-codex",
+            )
+
+    def test_rejects_a_missing_or_invalid_runner_group_when_release_requires_it(self):
+        for group in (None, "", "juror codex", "-juror", "juror/codex", "a" * 65):
+            with self.subTest(group=group):
+                with self.assertRaisesRegex(
+                    MODULE.CallerContractError, "requires runner_group"
+                ):
+                    MODULE.update_caller(
+                        dispatch_caller(),
+                        "codex_jira_dispatch.yml",
+                        NEW_SHA,
+                        requires_runner_group=True,
+                        runner_group=group,
+                    )
+
+    def test_rejects_runner_group_for_a_release_that_does_not_accept_it(self):
+        caller = with_runner_group(dispatch_caller(), "juror-codex")
+        with self.assertRaisesRegex(
+            MODULE.CallerContractError, "does not accept runner_group"
+        ):
+            MODULE.update_caller(caller, "codex_jira_dispatch.yml", NEW_SHA)
+
+    def test_does_not_add_runner_group_for_a_release_without_it(self):
+        updated = MODULE.update_caller(
+            dispatch_caller(),
+            "codex_jira_dispatch.yml",
+            NEW_SHA,
+            requires_runner_group=False,
+            runner_group="juror-codex",
+        )
+        self.assertNotIn("runner_group", updated)
+
+    def test_cli_checks_the_release_workflow_each_caller_calls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            release = root / "release"
+            release.mkdir()
+            (release / "codex-implement.yml").write_text(
+                release_workflow(with_runner_group=True), encoding="utf-8"
+            )
+            (release / "codex-review-feedback.yml").write_text(
+                release_workflow(with_runner_group=False), encoding="utf-8"
+            )
+            for name, caller, expect_group in (
+                ("codex_jira_dispatch.yml", dispatch_caller(), True),
+                ("codex_pr_review.yml", review_caller(), False),
+            ):
+                with self.subTest(caller=name):
+                    source = root / f"{name}.input"
+                    output = root / f"{name}.output"
+                    source.write_text(caller, encoding="utf-8")
+                    subprocess.run(
+                        [
+                            sys.executable,
+                            "-I",
+                            str(SCRIPT),
+                            "--workflow",
+                            f".github/workflows/{name}",
+                            "--release-sha",
+                            NEW_SHA,
+                            "--input",
+                            str(source),
+                            "--output",
+                            str(output),
+                            "--release-workflows",
+                            str(release),
+                            "--runner-group",
+                            "juror-codex",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertEqual(
+                        "      runner_group: juror-codex\n"
+                        in output.read_text(encoding="utf-8"),
+                        expect_group,
+                    )
 
 
 if __name__ == "__main__":

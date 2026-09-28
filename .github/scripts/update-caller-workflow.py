@@ -9,6 +9,8 @@ from pathlib import Path
 
 
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+RUNNER_GROUP_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+RUNNER_GROUP_INPUT = "runner_group"
 USES_PATTERN = re.compile(
     r"(?m)^(?P<indent>[ \t]*)uses:\s*"
     r"hmcts/codex-agent-workflows/\.github/workflows/"
@@ -115,6 +117,31 @@ def _mapping_keys(lines: list[str], start: int, end: int, indent: int) -> set[st
     return keys
 
 
+def _mapping_line(
+    lines: list[str], start: int, end: int, indent: int, key: str
+) -> int | None:
+    pattern = re.compile(rf"^\s{{{indent + 2}}}{re.escape(key)}:(?:\s|$)")
+    for index in range(start + 1, end):
+        if pattern.match(lines[index]):
+            return index
+    return None
+
+
+def release_requires_runner_group(workflow_text: str) -> bool:
+    """Return whether a shared workflow release declares the runner_group input."""
+    lines = workflow_text.splitlines(keepends=True)
+    on_start, on_end, _ = _block_bounds(lines, "on", 0, len(lines), 0)
+    call_start, call_end, _ = _block_bounds(
+        lines, "workflow_call", on_start, on_end, 2
+    )
+    inputs_start, inputs_end, inputs_indent = _block_bounds(
+        lines, "inputs", call_start, call_end, 4
+    )
+    return RUNNER_GROUP_INPUT in _mapping_keys(
+        lines, inputs_start, inputs_end, inputs_indent
+    )
+
+
 def _strict_secret_values(
     lines: list[str], start: int, end: int, indent: int
 ) -> dict[str, str]:
@@ -178,7 +205,14 @@ def _validate_review_event_contract(
         )
 
 
-def update_caller(content: str, filename: str, release_sha: str) -> str:
+def update_caller(
+    content: str,
+    filename: str,
+    release_sha: str,
+    *,
+    requires_runner_group: bool = False,
+    runner_group: str | None = None,
+) -> str:
     if filename not in WORKFLOW_CONTRACTS:
         raise CallerContractError(f"unsupported caller workflow: {filename}")
     if not SHA_PATTERN.fullmatch(release_sha):
@@ -237,6 +271,36 @@ def update_caller(content: str, filename: str, release_sha: str) -> str:
                 f"caller secret {secret} must map exactly to {expected_mapping}"
             )
 
+    if requires_runner_group:
+        if runner_group is None or not RUNNER_GROUP_PATTERN.fullmatch(runner_group):
+            raise CallerContractError(
+                "this release requires runner_group; supply a valid runner group name"
+            )
+        group_line = _mapping_line(
+            lines, with_start, with_end, with_indent, RUNNER_GROUP_INPUT
+        )
+        if group_line is None:
+            label_line = _mapping_line(
+                lines, with_start, with_end, with_indent, "runner_label"
+            )
+            insert_at = with_end if label_line is None else label_line + 1
+            lines.insert(
+                insert_at,
+                f"{' ' * (with_indent + 2)}{RUNNER_GROUP_INPUT}: {runner_group}\n",
+            )
+        else:
+            current = (
+                lines[group_line].split(":", 1)[1].split(" #", 1)[0].strip().strip("'\"")
+            )
+            if current != runner_group:
+                raise CallerContractError(
+                    f"caller runner_group {current} does not match the expected {runner_group}"
+                )
+    elif RUNNER_GROUP_INPUT in present_inputs:
+        raise CallerContractError(
+            "this release does not accept runner_group; the caller must not pass it"
+        )
+
     validated = "".join(lines)
     migrated = (
         validated[: matches[0].start("sha")]
@@ -254,13 +318,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--release-sha", required=True)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--release-workflows",
+        type=Path,
+        required=True,
+        help="directory holding the release's shared workflow files",
+    )
+    parser.add_argument("--runner-group")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    filename = Path(args.workflow).name
+    contract = WORKFLOW_CONTRACTS.get(filename)
+    if contract is None:
+        raise CallerContractError(f"unsupported caller workflow: {filename}")
+    release_workflow = args.release_workflows / contract["shared_workflow"]
     content = args.input.read_text(encoding="utf-8")
-    migrated = update_caller(content, Path(args.workflow).name, args.release_sha)
+    migrated = update_caller(
+        content,
+        filename,
+        args.release_sha,
+        requires_runner_group=release_requires_runner_group(
+            release_workflow.read_text(encoding="utf-8")
+        ),
+        runner_group=args.runner_group,
+    )
     args.output.write_text(migrated, encoding="utf-8")
     return 0
 
