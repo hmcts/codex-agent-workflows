@@ -3,6 +3,17 @@ name: Codex PR Review Feedback
 on:
   workflow_call:
     inputs:
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       runner_group:
         description: Organisation runner group containing the scale set
         required: true
@@ -85,6 +96,8 @@ jobs:
       issues: read
     uses: ./.github/workflows/codex-review-generate.yml
     with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
       runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
@@ -102,6 +115,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/codex-review-publish.yml
     with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
       github_app_client_id: ${{ inputs.github_app_client_id }}
       sonar_host_url: ${{ inputs.sonar_host_url }}
       sonar_project_key: ${{ inputs.sonar_project_key }}
@@ -128,6 +143,8 @@ jobs:
       issues: read
     uses: ./.github/workflows/codex-review-repair.yml
     with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
       runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
@@ -163,6 +180,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/codex-review-terminal.yml
     with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
       github_app_client_id: ${{ inputs.github_app_client_id }}
       jira_notify_timeout_seconds: ${{ inputs.jira_notify_timeout_seconds }}
       is_codex_pr: ${{ needs.intake.outputs.is_codex_pr }}

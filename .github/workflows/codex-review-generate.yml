@@ -3,6 +3,17 @@ name: Codex review generation and verification
 on:
   workflow_call:
     inputs:
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       runner_group:
         required: true
         type: string
@@ -62,6 +73,7 @@ permissions:
 
 jobs:
   codex-review-generate-action:
+    environment: ${{ inputs.model_environment }}
     if: inputs.is_codex_pr == 'true'
     runs-on:
       group: ${{ inputs.runner_group }}

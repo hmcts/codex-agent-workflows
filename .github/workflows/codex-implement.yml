@@ -32,6 +32,17 @@ on:
         required: false
         default: ''
         type: string
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       runner_group:
         description: Organisation runner group containing the scale set
         required: true
@@ -98,6 +109,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/codex-plan.yml
     with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
       description: ${{ inputs.description }}
@@ -120,6 +133,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/codex-generate.yml
     with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
       description: ${{ inputs.description }}
@@ -147,6 +162,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/codex-verification.yml
     with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
       description: ${{ inputs.description }}
@@ -174,6 +191,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/codex-publish.yml
     with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
       issueUrl: ${{ inputs.issueUrl }}
@@ -201,6 +220,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/codex-post-verify.yml
     with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
       node_version: ${{ inputs.node_version }}
       java_version: ${{ inputs.java_version }}
       sonar_host_url: ${{ inputs.sonar_host_url }}
@@ -224,6 +245,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/codex-post-repair.yml
     with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
       issueKey: ${{ inputs.issueKey }}
       summary: ${{ inputs.summary }}
       description: ${{ inputs.description }}

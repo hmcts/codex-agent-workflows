@@ -3,6 +3,17 @@ name: Codex review terminal failure
 on:
   workflow_call:
     inputs:
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       github_app_client_id:
         required: true
         type: string
@@ -41,6 +52,7 @@ permissions:
 
 jobs:
   codex-review-prepublication-verification-failed:
+    environment: ${{ inputs.publisher_environment }}
     if: |
       always() &&
       inputs.is_codex_pr == 'true' &&

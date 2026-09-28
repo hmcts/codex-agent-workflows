@@ -3,6 +3,17 @@ name: Codex review external repair
 on:
   workflow_call:
     inputs:
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       runner_group:
         required: true
         type: string
@@ -165,6 +176,7 @@ jobs:
           retention-days: 1
 
   codex-review-external-repair-action:
+    environment: ${{ inputs.model_environment }}
     needs: prepare-published-review-repair-source
     if: always() && inputs.initial_passed == 'false'
     runs-on:
@@ -396,6 +408,7 @@ jobs:
           retention-days: 1
 
   codex-review-external-republish:
+    environment: ${{ inputs.publisher_environment }}
     needs: [codex-review-external-repair-verify, prepare-published-review-repair-source]
     if: always() && needs.codex-review-external-repair-verify.outputs.passed == 'true'
     runs-on: ubuntu-latest
@@ -572,6 +585,7 @@ jobs:
           retention-days: 1
 
   codex-review-external-verification-failed:
+    environment: ${{ inputs.publisher_environment }}
     needs:
       [
         codex-review-external-repair-action,

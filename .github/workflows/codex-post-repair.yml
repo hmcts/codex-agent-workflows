@@ -25,6 +25,17 @@ on:
         required: false
         default: ''
         type: string
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
       runner_group:
         required: true
         type: string
@@ -117,6 +128,7 @@ on:
 
 jobs:
   repair-published-pr-1-action:
+    environment: ${{ inputs.model_environment }}
     if: always() && inputs.initial_passed == 'false' && inputs.initial_failure_class == 'implementation'
     runs-on:
       group: ${{ inputs.runner_group }}
@@ -362,6 +374,7 @@ jobs:
           retention-days: 1
 
   publish-published-pr-repair-1:
+    environment: ${{ inputs.publisher_environment }}
     needs: verify-published-pr-repair-1
     if: always() && needs.verify-published-pr-repair-1.outputs.passed == 'true'
     runs-on: ubuntu-latest
@@ -662,6 +675,7 @@ jobs:
           retention-days: 1
 
   codex-published-pr-verification-failed:
+    environment: ${{ inputs.publisher_environment }}
     needs:
       - repair-published-pr-1
       - verify-published-pr-repair-1
