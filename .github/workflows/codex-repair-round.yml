@@ -25,6 +25,9 @@ on:
         required: false
         default: ''
         type: string
+      runner_group:
+        required: true
+        type: string
       runner_label:
         required: true
         type: string
@@ -89,7 +92,9 @@ on:
 
 jobs:
   repair-action:
-    runs-on: ${{ inputs.runner_label }}
+    runs-on:
+      group: ${{ inputs.runner_group }}
+      labels: ${{ inputs.runner_label }}
     timeout-minutes: 120
     permissions:
       contents: read
