@@ -80,6 +80,18 @@ flowchart TB
     App -. unavailable .-> Model
 ```
 
+`check-shared-workflow-trust.rb` enforces the structure behind this diagram on every `codex-*.yml` component, and CI runs it on every change. It checks the following:
+
+- Each model job runs on the caller's runner group and label, in the caller's model environment. It receives only the OpenAI key, and the Codex Action is its final step.
+- Every other job runs on GitHub-hosted compute.
+- The GitHub App key and Jira callback URL appear only in jobs gated by the caller's publisher environment.
+- Credential-free jobs declare no environment. Sonar-only jobs are the one deliberate exception: they read analysis results with `CODEX_SONAR_TOKEN` and are not environment-gated.
+- Every job declares explicit read-only permissions.
+- Call sites forward `runner_group`, `runner_label`, `model_environment` and `publisher_environment` unchanged, so a stage cannot silently run without the caller's gate.
+- Unknown, dynamic or inherited secret references are rejected.
+
+The checker is a regression guard. The callers' environments and runner-group policies remain the enforced boundary.
+
 ## PR feedback
 
 ```mermaid
