@@ -1,4 +1,4 @@
-name: Update caller workflow pins
+name: Update caller workflows
 
 on:
   schedule:
@@ -11,17 +11,12 @@ on:
       - .github/scripts/**
       - '.github/workflows/codex-*.yml'
   workflow_dispatch:
-    inputs:
-      release_sha:
-        description: Shared workflow commit to publish
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: codex-caller-pin-release
+  group: codex-caller-update
   cancel-in-progress: false
 
 jobs:
@@ -40,7 +35,6 @@ jobs:
           - hmcts/juror-scheduler-api
     env:
       TARGET_REPOSITORY: ${{ matrix.repository }}
-      RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
       RUNNER_GROUP: juror-codex
 
     steps:
@@ -72,35 +66,20 @@ jobs:
           CODEX_PUBLISHER_REPOSITORY: ${{ matrix.repository }}
         run: python3 -I .github/scripts/codex-verify-publisher.py
 
-      - name: Verify release identity and revision
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          [[ "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
-          test -n "${GH_TOKEN}"
-          gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_SHA}" >/dev/null
-          merge_base="$(
-            gh api \
-              "repos/${GITHUB_REPOSITORY}/compare/${RELEASE_SHA}...main" \
-              --jq .merge_base_commit.sha
-          )"
-          test "${merge_base}" = "${RELEASE_SHA}"
-
-      - name: Raise caller pin update
+      - name: Raise caller update
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TARGET_BRANCH: master
         run: |
           set -euo pipefail
 
-          branch="codex/update-agent-workflows-${RELEASE_SHA:0:12}"
+          branch="codex/use-agent-workflows-main"
           base_sha="$(gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${TARGET_BRANCH}" --jq .object.sha)"
           update_dir="$RUNNER_TEMP/caller-update"
           release_dir="${update_dir}/release"
           mkdir -p "${release_dir}"
           for shared in codex-implement.yml codex-review-feedback.yml; do
-            gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/${shared}?ref=${RELEASE_SHA}" \
+            gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/${shared}?ref=main" \
               --jq .content | base64 --decode >"${release_dir}/${shared}"
           done
           changed=false
@@ -109,7 +88,7 @@ jobs:
             api_error="${update_dir}/${name}.api-error"
             if ! metadata="$(gh api "repos/${TARGET_REPOSITORY}/contents/${path}?ref=${TARGET_BRANCH}" 2>"${api_error}")"; then
               if python3 -I .github/scripts/is-explicit-contents-404.py "${api_error}"; then
-                echo "${TARGET_REPOSITORY} does not contain ${path}; skipping this release."
+                echo "${TARGET_REPOSITORY} does not contain ${path}; skipping this update."
                 exit 0
               fi
               cat "${api_error}" >&2
@@ -127,7 +106,6 @@ jobs:
             jq -r .content <<<"${metadata}" | base64 --decode >"${input_path}"
             python3 -I .github/scripts/update-caller-workflow.py \
               --workflow "${path}" \
-              --release-sha "${RELEASE_SHA}" \
               --input "${input_path}" \
               --output "${output_path}" \
               --release-workflows "${release_dir}" \
@@ -139,9 +117,27 @@ jobs:
           done
 
           if [[ "${changed}" != "true" ]]; then
-            echo "${TARGET_REPOSITORY} already uses ${RELEASE_SHA}."
+            echo "${TARGET_REPOSITORY} already uses the shared workflows from main."
             exit 0
           fi
+
+          # Never raise an update the caller's own Codex runs would then refuse:
+          # run the credential safety gate on the caller's workflows as they
+          # would stand after this PR merges.
+          gate_root="${update_dir}/gate"
+          mkdir -p "${gate_root}/.github/workflows"
+          gh api "repos/${TARGET_REPOSITORY}/contents/.github/workflows?ref=${TARGET_BRANCH}" \
+            --jq '.[] | select(.type == "file") | .name' >"${update_dir}/workflow-names"
+          while IFS= read -r workflow_name; do
+            gh api "repos/${TARGET_REPOSITORY}/contents/.github/workflows/${workflow_name}?ref=${TARGET_BRANCH}" \
+              --jq .content | base64 --decode >"${gate_root}/.github/workflows/${workflow_name}"
+          done <"${update_dir}/workflow-names"
+          for path in .github/workflows/codex_jira_dispatch.yml .github/workflows/codex_pr_review.yml; do
+            cp "${update_dir}/$(basename "${path}").output" "${gate_root}/${path}"
+          done
+          ruby .github/scripts/check-codex-pr-safety.rb \
+            --repository-root "${gate_root}" \
+            --trusted-repository-root "${gate_root}"
 
           existing="$(gh pr list --repo "${TARGET_REPOSITORY}" --head "${branch}" --state open --json url --jq '.[0].url // empty')"
           if [[ -n "${existing}" ]]; then
@@ -169,7 +165,7 @@ jobs:
             blob_sha="$(cat "${update_dir}/${name}.sha")"
             encoded="$(base64 <"${output_path}" | tr -d '\n')"
             gh api --method PUT "repos/${TARGET_REPOSITORY}/contents/${path}" \
-              -f message="Update Codex shared workflows to ${RELEASE_SHA:0:12}" \
+              -f message="Use the Codex shared workflows from main" \
               -f content="${encoded}" \
               -f sha="${blob_sha}" \
               -f branch="${branch}" >/dev/null
@@ -179,5 +175,5 @@ jobs:
             --repo "${TARGET_REPOSITORY}" \
             --base "${TARGET_BRANCH}" \
             --head "${branch}" \
-            --title "Update Codex shared workflows to ${RELEASE_SHA:0:12}" \
-            --body "Pins the Juror Codex caller workflows to the reviewed shared release at \`${RELEASE_SHA}\`."
+            --title "Use the Codex shared workflows from main" \
+            --body "Moves the Juror Codex caller workflows onto \`hmcts/codex-agent-workflows\` at \`main\` and names the \`${RUNNER_GROUP}\` runner group. The caller's workflows as changed here passed the shared credential safety gate before this PR was raised."
