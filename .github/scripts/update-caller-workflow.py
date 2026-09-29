@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Move a Juror caller onto the shared workflows at main and validate its contract."""
+"""Update and validate a Juror caller's shared-workflow contract."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 
-RELEASE_REF = "main"
+SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 RUNNER_GROUP_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 RUNNER_GROUP_INPUT = "runner_group"
 USES_PATTERN = re.compile(
@@ -208,15 +208,15 @@ def _validate_review_event_contract(
 def update_caller(
     content: str,
     filename: str,
-    release_ref: str = RELEASE_REF,
+    release_sha: str,
     *,
     requires_runner_group: bool = False,
     runner_group: str | None = None,
 ) -> str:
     if filename not in WORKFLOW_CONTRACTS:
         raise CallerContractError(f"unsupported caller workflow: {filename}")
-    if release_ref != RELEASE_REF:
-        raise CallerContractError(f"callers must reference the shared workflows at {RELEASE_REF}")
+    if not SHA_PATTERN.fullmatch(release_sha):
+        raise CallerContractError("release SHA must be 40 lowercase hexadecimal characters")
 
     matches = list(USES_PATTERN.finditer(content))
     if len(matches) != 1:
@@ -304,7 +304,7 @@ def update_caller(
     validated = "".join(lines)
     migrated = (
         validated[: matches[0].start("ref")]
-        + release_ref
+        + release_sha
         + validated[matches[0].end("ref") :]
     )
     if not migrated.endswith("\n"):
@@ -315,13 +315,14 @@ def update_caller(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workflow", required=True)
+    parser.add_argument("--release-sha", required=True)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--release-workflows",
         type=Path,
         required=True,
-        help="directory holding the shared workflow files from main",
+        help="directory holding the release's shared workflow files",
     )
     parser.add_argument("--runner-group")
     return parser
@@ -338,6 +339,7 @@ def main() -> int:
     migrated = update_caller(
         content,
         filename,
+        args.release_sha,
         requires_runner_group=release_requires_runner_group(
             release_workflow.read_text(encoding="utf-8")
         ),

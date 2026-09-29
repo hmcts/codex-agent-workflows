@@ -67,7 +67,7 @@ def trusted_review_contract!(analysis)
   end
 
   unless job["uses"].match?(TRUSTED_REVIEW_REFERENCE)
-    raise WorkflowSafetyError, "#{location}.uses must reference the trusted HMCTS review workflow at main"
+    raise WorkflowSafetyError, "#{location}.uses must pin the trusted HMCTS review workflow to a 40-character SHA"
   end
 
   with = job["with"]
@@ -119,7 +119,7 @@ def enforce_trusted_review_dispatch!(analysis, approved_analysis = nil)
   approved_contract = trusted_review_contract!(approved_analysis)
   unless candidate_contract["pin"] == approved_contract["pin"]
     raise WorkflowSafetyError,
-          "trusted review workflow reference must equal the default-branch reference #{approved_contract['pin']}"
+          "trusted review workflow pin must equal the immutable default-branch pin #{approved_contract['pin']}"
   end
   unless candidate_contract["with"] == approved_contract["with"]
     raise WorkflowSafetyError,
