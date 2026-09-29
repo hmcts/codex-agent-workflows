@@ -17,14 +17,6 @@ on:
       github_app_client_id:
         required: true
         type: string
-      sonar_host_url:
-        required: false
-        default: ''
-        type: string
-      sonar_project_key:
-        required: false
-        default: ''
-        type: string
       required_status_context:
         required: true
         type: string
@@ -73,8 +65,6 @@ on:
     secrets:
       CODEX_GITHUB_APP_PRIVATE_KEY:
         required: true
-      CODEX_SONAR_TOKEN:
-        required: false
 
 permissions:
   contents: read
@@ -223,9 +213,6 @@ jobs:
       failure_class: ${{ steps.verify.outputs.failure_class || 'implementation' }}
     env:
       GH_TOKEN: ${{ github.token }}
-      SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}
-      SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
-      SONAR_PROJECT_KEY: ${{ inputs.sonar_project_key }}
       PR_NUMBER: ${{ needs.codex-review-publish.outputs.pr_number }}
       PUBLISHED_COMMIT_SHA: ${{ needs.codex-review-publish.outputs.commit_sha }}
       REQUIRED_STATUS_CONTEXT: ${{ inputs.required_status_context }}
@@ -241,7 +228,7 @@ jobs:
           ref: ${{ inputs.trusted_sha }}
           persist-credentials: false
 
-      - name: Check external PR status and Sonar quality gate
+      - name: Check external PR status
         id: verify
         run: |
           set +e
@@ -251,9 +238,6 @@ jobs:
             status=$?
             if [[ "${status}" -eq 2 ]]; then
               failure_class=no-build
-            elif [[ "${status}" -eq 0 ]]; then
-              ${CODEX_RUNTIME_PATH}/.github/scripts/codex-check-sonar-quality-gate.sh
-              status=$?
             fi
           } >"$RUNNER_TEMP/codex-review-external-status.log" 2>&1
           cat "$RUNNER_TEMP/codex-review-external-status.log"

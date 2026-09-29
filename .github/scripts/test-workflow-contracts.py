@@ -228,7 +228,6 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("`pull_request_review` and `pull_request_review_comment` are not accepted", content)
         self.assertIn("whose `author_association` is exactly one of", content)
         self.assertIn("the same reference as the trusted default-branch wrapper", content)
-        self.assertIn("exactly `https://sonarcloud.io`", content)
         self.assertIn("cannot contain executable steps", content)
         self.assertIn("`workflow_dispatch` requires a trusted operator", content)
         self.assertIn("`repository_dispatch` requires an authenticated trusted service", content)

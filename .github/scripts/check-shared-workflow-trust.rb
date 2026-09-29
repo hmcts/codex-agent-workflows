@@ -18,13 +18,10 @@ MODEL_RUNNER = {
 }.freeze
 MODEL_ENVIRONMENT = "${{ inputs.model_environment }}"
 PUBLISHER_ENVIRONMENT = "${{ inputs.publisher_environment }}"
-# Sonar-only jobs read analysis results and are deliberately not gated by an
-# environment, so CODEX_SONAR_TOKEN maps to no environment.
 SECRET_ENVIRONMENTS = {
   "CODEX_OPENAI_API_KEY" => MODEL_ENVIRONMENT,
   "CODEX_GITHUB_APP_PRIVATE_KEY" => PUBLISHER_ENVIRONMENT,
   "CODEX_JIRA_PR_NOTIFY_URL" => PUBLISHER_ENVIRONMENT,
-  "CODEX_SONAR_TOKEN" => nil,
 }.freeze
 FORWARDED_INPUTS = %w[runner_group runner_label model_environment publisher_environment].freeze
 LOCAL_WORKFLOW = %r{\A\./\.github/workflows/(?<name>[A-Za-z0-9_.-]+\.ya?ml)\z}

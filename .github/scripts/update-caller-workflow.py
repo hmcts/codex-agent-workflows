@@ -41,8 +41,8 @@ WORKFLOW_CONTRACTS = {
         ),
     },
 }
-# Inputs the shared workflows are retiring. The updater removes them from a
-# caller once the release no longer requires them.
+# Inputs the shared workflows have retired. The updater removes them from any
+# caller that still passes them.
 RETIRED_INPUTS = ("sonar_host_url", "sonar_project_key")
 
 REQUIRED_SECRETS = (

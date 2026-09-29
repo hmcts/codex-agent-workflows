@@ -46,8 +46,6 @@ TRUSTED_REVIEW_INPUTS = %w[
   node_version
   java_version
   github_app_client_id
-  sonar_host_url
-  sonar_project_key
   required_status_context
   required_status_poll_seconds
   required_status_timeout_seconds
@@ -70,7 +68,6 @@ GITHUB_EXPRESSION = /\$\{\{/.freeze
 GLOB_MAGIC = /[*?\[\]{}+@]/.freeze
 LOCAL_WORKFLOW = %r{\A\./\.github/workflows/([^/]+\.ya?ml)\z}.freeze
 STATIC_VAR_EXPRESSION = /\A\$\{\{\s*vars\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}\z/.freeze
-APPROVED_SONAR_URL = "https://sonarcloud.io"
 
 WorkflowEntry = Struct.new(:relative_path, :absolute_path, :workflow, keyword_init: true)
 WorkflowRunConfig = Struct.new(:upstream_names, :branch_taint_reachable, keyword_init: true)

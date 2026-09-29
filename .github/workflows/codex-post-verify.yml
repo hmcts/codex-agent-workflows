@@ -22,14 +22,6 @@ on:
         required: false
         default: "21"
         type: string
-      sonar_host_url:
-        required: false
-        default: ''
-        type: string
-      sonar_project_key:
-        required: false
-        default: ''
-        type: string
       required_status_context:
         required: true
         type: string
@@ -66,9 +58,6 @@ on:
         value: ${{ jobs.verify-published-pr.outputs.failure_artifact }}
       failure_class:
         value: ${{ jobs.verify-published-pr.outputs.failure_class }}
-    secrets:
-      CODEX_SONAR_TOKEN:
-        required: false
 
 jobs:
   verify-published-pr-patch:
@@ -175,9 +164,6 @@ jobs:
       failure_class: ${{ steps.verify.outputs.failure_class || 'implementation' }}
     env:
       GH_TOKEN: ${{ github.token }}
-      SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}
-      SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
-      SONAR_PROJECT_KEY: ${{ inputs.sonar_project_key }}
       PR_NUMBER: ${{ inputs.pr_number }}
       PUBLISHED_COMMIT_SHA: ${{ inputs.commit_sha }}
       REQUIRED_STATUS_CONTEXT: ${{ inputs.required_status_context }}
@@ -193,7 +179,7 @@ jobs:
         with:
           ref: ${{ inputs.trusted_sha }}
           persist-credentials: false
-      - name: Check external PR status and Sonar quality gate
+      - name: Check external PR status
         id: verify
         env:
           LOCAL_VERIFICATION_PASSED: ${{ needs.verify-published-pr-patch.outputs.passed }}
@@ -212,9 +198,6 @@ jobs:
             status=$?
             if [[ "$status" -eq 2 ]]; then
               failure_class=no-build
-            elif [[ "$status" -eq 0 ]]; then
-              ${CODEX_RUNTIME_PATH}/.github/scripts/codex-check-sonar-quality-gate.sh
-              status=$?
             fi
           } >"$RUNNER_TEMP/codex-pr-status.log" 2>&1
           cat "$RUNNER_TEMP/codex-pr-status.log"
