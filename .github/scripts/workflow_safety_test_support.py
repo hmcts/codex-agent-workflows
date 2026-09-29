@@ -26,7 +26,7 @@ def named_workflow(name: str, body: str, *, trigger: str) -> str:
 
 
 def trusted_review_wrapper(
-    *, pin: str | None = None, sonar_host_url: str = "https://sonarcloud.io"
+    *, pin: str | None = None
 ) -> str:
     pin = pin or "1" * 40
     return f"""name: Codex PR Review
@@ -50,8 +50,6 @@ jobs:
       runner_label: codex-juror-api-aks
       java_version: "17"
       github_app_client_id: ${{{{ vars.CODEX_GITHUB_APP_CLIENT_ID }}}}
-      sonar_host_url: {sonar_host_url}
-      sonar_project_key: juror-api
     secrets:
       CODEX_OPENAI_API_KEY: ${{{{ secrets.CODEX_OPENAI_API_KEY }}}}
       CODEX_GITHUB_APP_PRIVATE_KEY: ${{{{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}}}

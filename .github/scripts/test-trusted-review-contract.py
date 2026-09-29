@@ -178,36 +178,6 @@ jobs:
                     trusted_workflows=trusted,
                 )
 
-    def test_trusted_review_sonar_origin_is_exact_and_not_expression_driven(self):
-        trusted = {"codex_pr_review.yml": trusted_review_wrapper()}
-        rejected_values = {
-            "alternate host": "https://attacker.example",
-            "userinfo": "https://token@sonarcloud.io",
-            "scheme": "http://sonarcloud.io",
-            "port": "https://sonarcloud.io:8443",
-            "path": "https://sonarcloud.io/api",
-            "expression": "${{ github.event.client_payload.sonar_url }}",
-            "static var": "${{ vars.SONAR_HOST_URL }}",
-        }
-        for case, value in rejected_values.items():
-            with self.subTest(case=case):
-                self.assert_workflows_blocked(
-                    {
-                        "codex_pr_review.yml": trusted_review_wrapper(
-                            sonar_host_url=value
-                        )
-                    },
-                    "must equal the approved Sonar origin https://sonarcloud.io",
-                    filename="codex_pr_review.yml",
-                    trusted_workflows=trusted,
-                )
-
-        completed = self.run_check(
-            {"codex_pr_review.yml": trusted_review_wrapper()},
-            trusted_workflows=trusted,
-        )
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-
     def test_trusted_review_inputs_equal_default_branch_contract(self):
         trusted = {"codex_pr_review.yml": trusted_review_wrapper()}
         mutations = {
@@ -217,7 +187,6 @@ jobs:
                 "vars.CODEX_GITHUB_APP_CLIENT_ID",
                 "vars.ATTACKER_GITHUB_APP_CLIENT_ID",
             ),
-            "Sonar project": ("sonar_project_key: juror-api", "sonar_project_key: attacker-project"),
         }
         for case, (before, after) in mutations.items():
             with self.subTest(case=case):
@@ -279,6 +248,25 @@ jobs:
             trusted_workflows={"codex_pr_review.yml": wrapper},
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_trusted_review_rejects_the_removed_sonar_inputs(self):
+        self.assertNotIn("sonar_", trusted_review_wrapper())
+        for name, value in {
+            "sonar_host_url": "https://sonarcloud.io",
+            "sonar_project_key": "juror-api",
+        }.items():
+            with self.subTest(input=name):
+                wrapper = trusted_review_wrapper().replace(
+                    '      java_version: "17"\n',
+                    f'      java_version: "17"\n      {name}: {value}\n',
+                    1,
+                )
+                self.assert_workflows_blocked(
+                    {"codex_pr_review.yml": wrapper},
+                    f"contains unsupported input(s): {name}",
+                    filename="codex_pr_review.yml",
+                    trusted_workflows={"codex_pr_review.yml": wrapper},
+                )
 
     def test_other_automatic_revision_event_roots_are_protected(self):
         triggers = {
