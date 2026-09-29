@@ -163,14 +163,21 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_release_updater_uses_contract_migrator(self):
         content = UPDATER_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("- '.github/workflows/codex-*.yml'", content)
         self.assertIn(".github/scripts/update-caller-workflow.py", content)
         self.assertNotIn("sed -E", content)
 
-    def test_release_updater_only_skips_explicit_contents_404_and_retries(self):
+    def test_release_updater_runs_only_when_dispatched(self):
         content = UPDATER_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("schedule:", content)
-        self.assertIn("cron: '17 */6 * * *'", content)
+        triggers = content[content.index("\non:\n") : content.index("\npermissions:")]
+        self.assertIn("workflow_dispatch:", triggers)
+        self.assertIn("release_sha:", triggers)
+        self.assertIn("required: true", triggers)
+        for automatic in ("schedule:", "push:", "pull_request", "workflow_run:"):
+            with self.subTest(trigger=automatic):
+                self.assertNotIn(automatic, triggers)
+
+    def test_release_updater_only_skips_explicit_contents_404(self):
+        content = UPDATER_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("HTTP 404", content)
         self.assertIn("only an explicit Contents API HTTP 404", content)
         lookup_start = content.index('metadata="$(gh api')
@@ -669,7 +676,7 @@ class WorkflowContractTests(unittest.TestCase):
         verify = content.index("- name: Verify release identity and revision")
         raise_update = content.index("- name: Raise caller pin update")
         self.assertLess(verify, raise_update)
-        self.assertIn("RELEASE_SHA: ${{ inputs.release_sha || github.sha }}", content)
+        self.assertIn("RELEASE_SHA: ${{ inputs.release_sha }}\n", content)
         self.assertIn('[[ "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]', content)
         self.assertIn('compare/${RELEASE_SHA}...main', content)
         self.assertIn('test "${merge_base}" = "${RELEASE_SHA}"', content)
@@ -677,8 +684,10 @@ class WorkflowContractTests(unittest.TestCase):
     def test_release_updater_keeps_one_open_pin_update_per_caller(self):
         content = UPDATER_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn('branch="codex/update-agent-workflows"\n', content)
-        self.assertIn('legacy_branch="codex/use-agent-workflows-main"\n', content)
-        open_check = content.index('for open_branch in "${branch}" "${legacy_branch}"; do')
+        self.assertNotIn("legacy_branch", content)
+        open_check = content.index(
+            'existing="$(gh pr list --repo "${TARGET_REPOSITORY}" --head "${branch}" --state open'
+        )
         branch_create = content.index(
             'gh api --method POST "repos/${TARGET_REPOSITORY}/git/refs"'
         )
