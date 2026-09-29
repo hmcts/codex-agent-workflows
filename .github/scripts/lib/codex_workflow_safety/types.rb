@@ -57,8 +57,6 @@ REQUIRED_TRUSTED_REVIEW_INPUTS = %w[
   runner_group
   runner_label
   github_app_client_id
-  sonar_host_url
-  sonar_project_key
 ].freeze
 TRUSTED_REVIEW_SECRETS = %w[
   CODEX_OPENAI_API_KEY

@@ -2,7 +2,7 @@
 
 ## Required dispatch inputs
 
-The caller forwards Jira issue key, summary, description, status, assignee and URL. It also forwards the optional `initiatorDisplayName` supplied by Jira Automation, and supplies its repository-scoped runner label, Sonar configuration, required status context and the client ID of the HMCTS-owned Codex GitHub App.
+The caller forwards Jira issue key, summary, description, status, assignee and URL. It also forwards the optional `initiatorDisplayName` supplied by Jira Automation, and supplies its runner group, repository-scoped runner label, required status context and the client ID of the HMCTS-owned Codex GitHub App. The Sonar inputs are retired: callers no longer pass `sonar_host_url` or `sonar_project_key`.
 
 The initiating display name is used only by trusted collection jobs to add traceability to the PR body. It is not included in model prompts. Missing or invalid values render as `Not supplied by Jira Automation`; callers must not substitute the assignee or reporter.
 
@@ -12,7 +12,7 @@ The initiating display name is used only by trusted collection jobs to add trace
 - `CODEX_GITHUB_APP_PRIVATE_KEY`
 - `CODEX_JIRA_PR_NOTIFY_URL`
 
-`CODEX_SONAR_TOKEN` is optional. When configured, it enables the revision-specific Sonar API quality-gate check. When absent, the workflow records that the API check was skipped and continues to treat the repository's required Jenkins, Sonar and GitHub status checks as authoritative.
+`CODEX_SONAR_TOKEN` is retired along with the Sonar inputs and is being removed. No caller passes it, so the workflow records that the Sonar API quality-gate check was skipped and treats the repository's own required Jenkins, Sonar and GitHub status checks as authoritative.
 
 Each trusted publisher job mints a short-lived GitHub App installation token restricted to the caller repository. The App bot identity is verified and derived at runtime; no publisher PAT or stored login is required. Secrets are unavailable to generated code and credential-free verification jobs.
 

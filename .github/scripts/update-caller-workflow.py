@@ -31,8 +31,6 @@ WORKFLOW_CONTRACTS = {
             "initiatorDisplayName",
             "runner_label",
             "github_app_client_id",
-            "sonar_host_url",
-            "sonar_project_key",
         ),
     },
     "codex_pr_review.yml": {
@@ -40,11 +38,12 @@ WORKFLOW_CONTRACTS = {
         "inputs": (
             "runner_label",
             "github_app_client_id",
-            "sonar_host_url",
-            "sonar_project_key",
         ),
     },
 }
+# Inputs the shared workflows are retiring. The updater removes them from a
+# caller once the release no longer requires them.
+RETIRED_INPUTS = ("sonar_host_url", "sonar_project_key")
 
 REQUIRED_SECRETS = (
     "CODEX_OPENAI_API_KEY",
@@ -127,8 +126,7 @@ def _mapping_line(
     return None
 
 
-def release_requires_runner_group(workflow_text: str) -> bool:
-    """Return whether a shared workflow release declares the runner_group input."""
+def _release_inputs(workflow_text: str) -> tuple[list[str], int, int, int]:
     lines = workflow_text.splitlines(keepends=True)
     on_start, on_end, _ = _block_bounds(lines, "on", 0, len(lines), 0)
     call_start, call_end, _ = _block_bounds(
@@ -137,9 +135,31 @@ def release_requires_runner_group(workflow_text: str) -> bool:
     inputs_start, inputs_end, inputs_indent = _block_bounds(
         lines, "inputs", call_start, call_end, 4
     )
+    return lines, inputs_start, inputs_end, inputs_indent
+
+
+def release_requires_runner_group(workflow_text: str) -> bool:
+    """Return whether a shared workflow release declares the runner_group input."""
+    lines, inputs_start, inputs_end, inputs_indent = _release_inputs(workflow_text)
     return RUNNER_GROUP_INPUT in _mapping_keys(
         lines, inputs_start, inputs_end, inputs_indent
     )
+
+
+def release_required_inputs(workflow_text: str) -> set[str]:
+    """Return the workflow_call inputs a shared workflow release marks required."""
+    lines, inputs_start, inputs_end, inputs_indent = _release_inputs(workflow_text)
+    key_pattern = re.compile(rf"^\s{{{inputs_indent + 2}}}([A-Za-z0-9_]+):\s*$")
+    required_pattern = re.compile(rf"^\s{{{inputs_indent + 4}}}required:\s*true\s*$")
+    required: set[str] = set()
+    current = None
+    for line in lines[inputs_start + 1 : inputs_end]:
+        match = key_pattern.match(line)
+        if match:
+            current = match.group(1)
+        elif current and required_pattern.match(line):
+            required.add(current)
+    return required
 
 
 def _strict_secret_values(
@@ -212,6 +232,7 @@ def update_caller(
     *,
     requires_runner_group: bool = False,
     runner_group: str | None = None,
+    remove_inputs: tuple[str, ...] = (),
 ) -> str:
     if filename not in WORKFLOW_CONTRACTS:
         raise CallerContractError(f"unsupported caller workflow: {filename}")
@@ -270,6 +291,18 @@ def update_caller(
             raise CallerContractError(
                 f"caller secret {secret} must map exactly to {expected_mapping}"
             )
+
+    for name in remove_inputs:
+        retired_line = _mapping_line(lines, with_start, with_end, with_indent, name)
+        if retired_line is None:
+            continue
+        following = lines[retired_line + 1] if retired_line + 1 < with_end else ""
+        if following.strip() and len(following) - len(following.lstrip()) > with_indent + 2:
+            raise CallerContractError(
+                f"caller input {name} spans several lines and cannot be removed safely"
+            )
+        del lines[retired_line]
+        with_end -= 1
 
     if requires_runner_group:
         if runner_group is None or not RUNNER_GROUP_PATTERN.fullmatch(runner_group):
@@ -333,15 +366,17 @@ def main() -> int:
     contract = WORKFLOW_CONTRACTS.get(filename)
     if contract is None:
         raise CallerContractError(f"unsupported caller workflow: {filename}")
-    release_workflow = args.release_workflows / contract["shared_workflow"]
+    release_workflow = (args.release_workflows / contract["shared_workflow"]).read_text(
+        encoding="utf-8"
+    )
     content = args.input.read_text(encoding="utf-8")
+    still_required = release_required_inputs(release_workflow)
     migrated = update_caller(
         content,
         filename,
-        requires_runner_group=release_requires_runner_group(
-            release_workflow.read_text(encoding="utf-8")
-        ),
+        requires_runner_group=release_requires_runner_group(release_workflow),
         runner_group=args.runner_group,
+        remove_inputs=tuple(name for name in RETIRED_INPUTS if name not in still_required),
     )
     args.output.write_text(migrated, encoding="utf-8")
     return 0

@@ -271,6 +271,19 @@ jobs:
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
+    def test_trusted_review_accepts_a_wrapper_without_retired_sonar_inputs(self):
+        wrapper = (
+            trusted_review_wrapper()
+            .replace("      sonar_host_url: https://sonarcloud.io\n", "", 1)
+            .replace("      sonar_project_key: juror-api\n", "", 1)
+        )
+        self.assertNotIn("sonar_", wrapper)
+        completed = self.run_check(
+            {"codex_pr_review.yml": wrapper},
+            trusted_workflows={"codex_pr_review.yml": wrapper},
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_other_automatic_revision_event_roots_are_protected(self):
         triggers = {
             "create": "on: create",

@@ -37,12 +37,14 @@ on:
         required: true
         type: string
       sonar_host_url:
-        description: SonarQube base URL
-        required: true
+        description: Retired and optional; SonarQube base URL, used only with CODEX_SONAR_TOKEN
+        required: false
+        default: ''
         type: string
       sonar_project_key:
-        description: SonarQube project key for the caller repository
-        required: true
+        description: Retired and optional; SonarQube project key, used only with CODEX_SONAR_TOKEN
+        required: false
+        default: ''
         type: string
       required_status_context:
         description: Required post-PR status context

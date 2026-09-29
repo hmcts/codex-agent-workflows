@@ -165,7 +165,7 @@ jobs:
             blob_sha="$(cat "${update_dir}/${name}.sha")"
             encoded="$(base64 <"${output_path}" | tr -d '\n')"
             gh api --method PUT "repos/${TARGET_REPOSITORY}/contents/${path}" \
-              -f message="Use the Codex shared workflows from main" \
+              -f message="Update the Codex caller workflows" \
               -f content="${encoded}" \
               -f sha="${blob_sha}" \
               -f branch="${branch}" >/dev/null
@@ -175,5 +175,5 @@ jobs:
             --repo "${TARGET_REPOSITORY}" \
             --base "${TARGET_BRANCH}" \
             --head "${branch}" \
-            --title "Use the Codex shared workflows from main" \
-            --body "Moves the Juror Codex caller workflows onto \`hmcts/codex-agent-workflows\` at \`main\` and names the \`${RUNNER_GROUP}\` runner group. The caller's workflows as changed here passed the shared credential safety gate before this PR was raised."
+            --title "Update the Codex caller workflows" \
+            --body "Brings the Juror Codex caller workflows in line with \`hmcts/codex-agent-workflows\` at \`main\`: they reference \`main\`, name the \`${RUNNER_GROUP}\` runner group and drop the retired Sonar settings. The caller's workflows as changed here passed the shared credential safety gate before this PR was raised."

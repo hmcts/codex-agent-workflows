@@ -416,5 +416,106 @@ class RunnerGroupTests(unittest.TestCase):
                     )
 
 
+def release_with_sonar(*, required: bool) -> str:
+    flag = "true" if required else "false"
+    default = "" if required else "        default: ''\n"
+    return (
+        "name: Codex implementation\n"
+        "\n"
+        "on:\n"
+        "  workflow_call:\n"
+        "    inputs:\n"
+        "      runner_group:\n"
+        "        required: true\n"
+        "        type: string\n"
+        "      sonar_host_url:\n"
+        f"        required: {flag}\n"
+        f"{default}"
+        "        type: string\n"
+        "      sonar_project_key:\n"
+        f"        required: {flag}\n"
+        f"{default}"
+        "        type: string\n"
+        "\n"
+        "jobs:\n"
+        "  plan:\n"
+        "    uses: ./.github/workflows/codex-plan.yml\n"
+        "    with:\n"
+        "      sonar_project_key: ${{ inputs.sonar_project_key }}\n"
+    )
+
+
+class RetiredInputTests(unittest.TestCase):
+    def test_reads_which_inputs_a_release_still_requires(self):
+        self.assertEqual(
+            MODULE.release_required_inputs(release_with_sonar(required=True)),
+            {"runner_group", "sonar_host_url", "sonar_project_key"},
+        )
+        self.assertEqual(
+            MODULE.release_required_inputs(release_with_sonar(required=False)),
+            {"runner_group"},
+        )
+
+    def test_removes_retired_inputs_and_keeps_everything_else(self):
+        updated = MODULE.update_caller(
+            dispatch_caller(), "codex_jira_dispatch.yml", remove_inputs=MODULE.RETIRED_INPUTS
+        )
+        self.assertNotIn("sonar_", updated)
+        for kept in ("runner_label: codex-juror-api-aks", "github_app_client_id:", "issueUrl:"):
+            self.assertIn(kept, updated)
+        again = MODULE.update_caller(
+            updated, "codex_jira_dispatch.yml", remove_inputs=MODULE.RETIRED_INPUTS
+        )
+        self.assertEqual(again, updated)
+
+    def test_refuses_to_remove_a_multi_line_retired_input(self):
+        caller = dispatch_caller().replace(
+            "      sonar_project_key: juror-api\n",
+            "      sonar_project_key: >-\n        juror-api\n",
+        )
+        with self.assertRaisesRegex(MODULE.CallerContractError, "spans several lines"):
+            MODULE.update_caller(
+                caller, "codex_jira_dispatch.yml", remove_inputs=MODULE.RETIRED_INPUTS
+            )
+
+    def test_cli_removes_sonar_only_once_the_release_stops_requiring_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for required, expect_sonar in ((True, True), (False, False)):
+                with self.subTest(release_requires_sonar=required):
+                    release = root / f"release-{required}"
+                    release.mkdir()
+                    (release / "codex-implement.yml").write_text(
+                        release_with_sonar(required=required), encoding="utf-8"
+                    )
+                    source = root / f"input-{required}.yml"
+                    output = root / f"output-{required}.yml"
+                    source.write_text(dispatch_caller(), encoding="utf-8")
+                    subprocess.run(
+                        [
+                            sys.executable,
+                            "-I",
+                            str(SCRIPT),
+                            "--workflow",
+                            ".github/workflows/codex_jira_dispatch.yml",
+                            "--input",
+                            str(source),
+                            "--output",
+                            str(output),
+                            "--release-workflows",
+                            str(release),
+                            "--runner-group",
+                            "juror-codex",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertEqual(
+                        "sonar_project_key" in output.read_text(encoding="utf-8"),
+                        expect_sonar,
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

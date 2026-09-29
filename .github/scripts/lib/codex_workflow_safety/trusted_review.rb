@@ -82,7 +82,9 @@ def trusted_review_contract!(analysis)
   unless missing_inputs.empty?
     raise WorkflowSafetyError, "#{location}.with is missing required input(s): #{missing_inputs.join(', ')}"
   end
-  validate_approved_sonar_url!(with["sonar_host_url"], "#{location}.with.sonar_host_url")
+  if with.key?("sonar_host_url")
+    validate_approved_sonar_url!(with["sonar_host_url"], "#{location}.with.sonar_host_url")
+  end
   with.each do |name, value|
     unless value.is_a?(String) && (!value.match?(GITHUB_EXPRESSION) || value.match?(STATIC_VAR_EXPRESSION))
       raise WorkflowSafetyError, "#{location}.with.#{name} must be a literal or static vars reference"

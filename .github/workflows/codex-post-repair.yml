@@ -54,10 +54,12 @@ on:
         required: true
         type: string
       sonar_host_url:
-        required: true
+        required: false
+        default: ''
         type: string
       sonar_project_key:
-        required: true
+        required: false
+        default: ''
         type: string
       required_status_context:
         required: true
