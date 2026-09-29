@@ -2,7 +2,7 @@
 
 ## Required dispatch inputs
 
-The caller forwards Jira issue key, summary, description, status, assignee and URL. It also forwards the optional `initiatorDisplayName` supplied by Jira Automation, and supplies its repository-scoped runner label, Sonar configuration, required status context and the client ID of the HMCTS-owned Codex GitHub App.
+The caller forwards Jira issue key, summary, description, status, assignee and URL. It also forwards the optional `initiatorDisplayName` supplied by Jira Automation, and supplies its runner group, repository-scoped runner label, required status context and the client ID of the HMCTS-owned Codex GitHub App.
 
 The initiating display name is used only by trusted collection jobs to add traceability to the PR body. It is not included in model prompts. Missing or invalid values render as `Not supplied by Jira Automation`; callers must not substitute the assignee or reporter.
 
@@ -12,11 +12,11 @@ The initiating display name is used only by trusted collection jobs to add trace
 - `CODEX_GITHUB_APP_PRIVATE_KEY`
 - `CODEX_JIRA_PR_NOTIFY_URL`
 
-`CODEX_SONAR_TOKEN` is optional. When configured, it enables the revision-specific Sonar API quality-gate check. When absent, the workflow records that the API check was skipped and continues to treat the repository's required Jenkins, Sonar and GitHub status checks as authoritative.
+The shared workflows have no Sonar integration of their own. After publication, the workflow waits for the required Jenkins status and treats the repository's own required Jenkins, Sonar and GitHub status checks as authoritative.
 
 Each trusted publisher job mints a short-lived GitHub App installation token restricted to the caller repository. The App bot identity is verified and derived at runtime; no publisher PAT or stored login is required. Secrets are unavailable to generated code and credential-free verification jobs.
 
-Callers must pass `CODEX_JIRA_PR_NOTIFY_URL` to both the implementation and PR-review reusable workflows. Terminal Jenkins, Sonar or credential-free verification failures return the PR to draft, attach the final evidence and notify Jira from a fresh trusted job.
+Callers must pass `CODEX_JIRA_PR_NOTIFY_URL` to both the implementation and PR-review reusable workflows. Terminal Jenkins or credential-free verification failures return the PR to draft, attach the final evidence and notify Jira from a fresh trusted job.
 
 The trusted plan-validation job retains the complete normalised `plan.json`, its SHA-256 file and the approved path list as the `codex-validated-plan` workflow artefact for 30 days. Planning or trusted validation failures attempt a terminal Jira callback containing the workflow run URL before implementation starts.
 

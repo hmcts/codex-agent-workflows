@@ -201,4 +201,4 @@ jobs:
             --base "${TARGET_BRANCH}" \
             --head "${branch}" \
             --title "Update Codex shared workflows to ${RELEASE_SHA:0:12}" \
-            --body "Pins the Juror Codex caller workflows to the reviewed shared release at \`${RELEASE_SHA}\`, adding the \`${RUNNER_GROUP}\` runner group where the release requires it.${changes} The caller's workflows as changed here passed the shared credential safety gate before this PR was raised."
+            --body "Pins the Juror Codex caller workflows to the reviewed shared release at \`${RELEASE_SHA}\`, adding the \`${RUNNER_GROUP}\` runner group where the release requires it and removing any inputs the release has retired.${changes} The caller's workflows as changed here passed the shared credential safety gate before this PR was raised."

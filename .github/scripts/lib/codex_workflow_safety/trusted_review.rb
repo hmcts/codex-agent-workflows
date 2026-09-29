@@ -11,20 +11,6 @@ def trusted_review_candidate?(workflow)
   job.is_a?(Hash) && job["uses"].is_a?(String) && job["uses"].start_with?(TRUSTED_REVIEW_PREFIX)
 end
 
-def validate_approved_sonar_url!(value, location)
-  begin
-    uri = URI.parse(value.to_s)
-  rescue URI::InvalidURIError
-    uri = nil
-  end
-  valid_origin = uri && uri.scheme == "https" && uri.host == "sonarcloud.io" &&
-                 uri.userinfo.nil? && uri.port == 443 && uri.path.empty? &&
-                 uri.query.nil? && uri.fragment.nil?
-  unless valid_origin && value == APPROVED_SONAR_URL
-    raise WorkflowSafetyError, "#{location} must equal the approved Sonar origin #{APPROVED_SONAR_URL}"
-  end
-end
-
 def trusted_review_contract!(analysis)
   workflow = analysis.entry.workflow
   events = analysis.events
@@ -82,7 +68,6 @@ def trusted_review_contract!(analysis)
   unless missing_inputs.empty?
     raise WorkflowSafetyError, "#{location}.with is missing required input(s): #{missing_inputs.join(', ')}"
   end
-  validate_approved_sonar_url!(with["sonar_host_url"], "#{location}.with.sonar_host_url")
   with.each do |name, value|
     unless value.is_a?(String) && (!value.match?(GITHUB_EXPRESSION) || value.match?(STATIC_VAR_EXPRESSION))
       raise WorkflowSafetyError, "#{location}.with.#{name} must be a literal or static vars reference"

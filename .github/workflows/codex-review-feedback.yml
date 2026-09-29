@@ -36,14 +36,6 @@ on:
         description: Client ID of the HMCTS-owned Codex GitHub App
         required: true
         type: string
-      sonar_host_url:
-        description: SonarQube base URL
-        required: true
-        type: string
-      sonar_project_key:
-        description: SonarQube project key for the caller repository
-        required: true
-        type: string
       required_status_context:
         description: Required post-PR status context
         required: false
@@ -69,8 +61,6 @@ on:
         required: true
       CODEX_GITHUB_APP_PRIVATE_KEY:
         required: true
-      CODEX_SONAR_TOKEN:
-        required: false
       CODEX_JIRA_PR_NOTIFY_URL:
         required: true
 
@@ -134,8 +124,6 @@ jobs:
       model_environment: ${{ inputs.model_environment }}
       publisher_environment: ${{ inputs.publisher_environment }}
       github_app_client_id: ${{ inputs.github_app_client_id }}
-      sonar_host_url: ${{ inputs.sonar_host_url }}
-      sonar_project_key: ${{ inputs.sonar_project_key }}
       required_status_context: ${{ inputs.required_status_context }}
       required_status_poll_seconds: ${{ inputs.required_status_poll_seconds }}
       required_status_timeout_seconds: ${{ inputs.required_status_timeout_seconds }}
@@ -148,7 +136,6 @@ jobs:
       verification_passed: ${{ needs.generate-and-verify.outputs.passed }}
     secrets:
       CODEX_GITHUB_APP_PRIVATE_KEY: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
-      CODEX_SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}
 
   repair:
     needs: [generate-and-verify, publish]
@@ -166,8 +153,6 @@ jobs:
       node_version: ${{ inputs.node_version }}
       java_version: ${{ inputs.java_version }}
       github_app_client_id: ${{ inputs.github_app_client_id }}
-      sonar_host_url: ${{ inputs.sonar_host_url }}
-      sonar_project_key: ${{ inputs.sonar_project_key }}
       required_status_context: ${{ inputs.required_status_context }}
       required_status_poll_seconds: ${{ inputs.required_status_poll_seconds }}
       required_status_timeout_seconds: ${{ inputs.required_status_timeout_seconds }}
@@ -187,7 +172,6 @@ jobs:
       CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
       CODEX_GITHUB_APP_PRIVATE_KEY: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
-      CODEX_SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}
 
   terminal-failure:
     needs: [intake, generate-and-verify, publish]

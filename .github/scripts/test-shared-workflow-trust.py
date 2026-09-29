@@ -59,17 +59,6 @@ PUBLISH_JOB = """\
           NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
         run: echo publish
 """
-SONAR_JOB = """\
-  sonar:
-    permissions:
-      contents: read
-    runs-on: ubuntu-latest
-    steps:
-      - name: Read Sonar results
-        env:
-          SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}
-        run: echo sonar
-"""
 VERIFY_JOB = """\
   verify:
     permissions:
@@ -100,10 +89,9 @@ def child_workflow(
     triggers: str = CALL_TRIGGER,
     model: str = MODEL_JOB,
     publish: str = PUBLISH_JOB,
-    sonar: str = SONAR_JOB,
     verify: str = VERIFY_JOB,
 ) -> str:
-    return f"name: Child\n{triggers}jobs:\n{model}{publish}{sonar}{verify}"
+    return f"name: Child\n{triggers}jobs:\n{model}{publish}{verify}"
 
 
 def parent_workflow(*, call: str = CALL_JOB) -> str:
@@ -135,7 +123,7 @@ class SharedWorkflowTrustTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_compliant_workflows_pass_including_ungated_sonar_job(self):
+    def test_compliant_workflows_pass(self):
         result = check()
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -229,6 +217,17 @@ class SharedWorkflowTrustTests(unittest.TestCase):
                     verify=VERIFY_JOB.replace(
                         "        run: echo verify\n",
                         "        env:\n          T: ${{ secrets.OTHER_TOKEN }}\n"
+                        "        run: echo verify\n",
+                    )
+                ),
+                None,
+                "unknown or dynamic credential reference",
+            ),
+            "removed Sonar token": (
+                child_workflow(
+                    verify=VERIFY_JOB.replace(
+                        "        run: echo verify\n",
+                        "        env:\n          SONAR_TOKEN: ${{ secrets.CODEX_SONAR_TOKEN }}\n"
                         "        run: echo verify\n",
                     )
                 ),

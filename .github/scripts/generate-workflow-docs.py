@@ -54,7 +54,7 @@ flowchart LR
     Repair --> Collect
     Verify -->|passed| Publish[GitHub App publication]
     Verify -->|repairs exhausted| Draft[Draft PR with evidence]
-    Publish --> Checks[Jenkins, Sonar and required checks]
+    Publish --> Checks[Jenkins and required checks]
     Checks -->|failed| PostRepair[Post-publication repair]
     Checks -->|not buildable| Draft
     Checks -->|passed| Ready[Ready PR and Jira callback]
@@ -85,7 +85,7 @@ flowchart TB
 - Each model job runs on the caller's runner group and label, in the caller's model environment. It receives only the OpenAI key, and the Codex Action is its final step.
 - Every other job runs on GitHub-hosted compute.
 - The GitHub App key and Jira callback URL appear only in jobs gated by the caller's publisher environment.
-- Credential-free jobs declare no environment. Sonar-only jobs are the one deliberate exception: they read analysis results with `CODEX_SONAR_TOKEN` and are not environment-gated.
+- Credential-free jobs declare no environment.
 - Every job declares explicit read-only permissions.
 - Call sites forward `runner_group`, `runner_label`, `model_environment` and `publisher_environment` unchanged, so a stage cannot silently run without the caller's gate.
 - Unknown, dynamic or inherited secret references are rejected.
