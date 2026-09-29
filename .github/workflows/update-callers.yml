@@ -1,15 +1,8 @@
 name: Update caller workflow pins
 
+# Releases are deliberate: merging to main publishes nothing until an
+# operator dispatches this workflow with the reviewed commit to pin.
 on:
-  schedule:
-    - cron: '17 */6 * * *'
-  push:
-    branches: [main]
-    paths:
-      - .github/actions/runtime/**
-      - .github/schemas/**
-      - .github/scripts/**
-      - '.github/workflows/codex-*.yml'
   workflow_dispatch:
     inputs:
       release_sha:
@@ -40,7 +33,7 @@ jobs:
           - hmcts/juror-scheduler-api
     env:
       TARGET_REPOSITORY: ${{ matrix.repository }}
-      RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
+      RELEASE_SHA: ${{ inputs.release_sha }}
       RUNNER_GROUP: juror-codex
 
     steps:
@@ -95,10 +88,8 @@ jobs:
           set -euo pipefail
 
           # One open pin update per caller: a newer release waits until the
-          # open update merges. The legacy branch holds the updates raised
-          # while callers briefly referenced main.
+          # open update merges.
           branch="codex/update-agent-workflows"
-          legacy_branch="codex/use-agent-workflows-main"
           base_sha="$(gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${TARGET_BRANCH}" --jq .object.sha)"
           update_dir="$RUNNER_TEMP/caller-update"
           release_dir="${update_dir}/release"
@@ -165,13 +156,11 @@ jobs:
             --repository-root "${gate_root}" \
             --trusted-repository-root "${gate_root}"
 
-          for open_branch in "${branch}" "${legacy_branch}"; do
-            existing="$(gh pr list --repo "${TARGET_REPOSITORY}" --head "${open_branch}" --state open --json url --jq '.[0].url // empty')"
-            if [[ -n "${existing}" ]]; then
-              echo "Caller update already open: ${existing}"
-              exit 0
-            fi
-          done
+          existing="$(gh pr list --repo "${TARGET_REPOSITORY}" --head "${branch}" --state open --json url --jq '.[0].url // empty')"
+          if [[ -n "${existing}" ]]; then
+            echo "Caller update already open: ${existing}"
+            exit 0
+          fi
 
           if gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${branch}" >/dev/null 2>&1; then
             gh api --method PATCH "repos/${TARGET_REPOSITORY}/git/refs/heads/${branch}" \
