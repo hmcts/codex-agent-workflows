@@ -43,9 +43,9 @@ on:
         type: string
     secrets:
       CODEX_GITHUB_APP_PRIVATE_KEY:
-        required: true
+        required: false
       CODEX_JIRA_PR_NOTIFY_URL:
-        required: true
+        required: false
 
 permissions:
   contents: read

@@ -58,11 +58,14 @@ on:
         type: string
     secrets:
       CODEX_OPENAI_API_KEY:
-        required: true
+        description: Pass it from the caller, or leave it empty when the caller's model environment holds it. The job that uses it fails if it is empty.
+        required: false
       CODEX_GITHUB_APP_PRIVATE_KEY:
-        required: true
+        description: Pass it from the caller, or leave it empty when the caller's publisher environment holds it. The job that uses it fails if it is empty.
+        required: false
       CODEX_JIRA_PR_NOTIFY_URL:
-        required: true
+        description: Pass it from the caller, or leave it empty when the caller's publisher environment holds it. The job that uses it fails if it is empty.
+        required: false
 
 permissions:
   contents: read

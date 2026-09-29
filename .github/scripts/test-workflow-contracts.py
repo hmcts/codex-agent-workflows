@@ -122,11 +122,35 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("fetch_pull_request_by_number", recovery_helper)
         self.assertIn("DEFAULT_RECOVERY_ATTEMPTS", recovery_helper)
 
-    def test_both_reusable_workflows_require_jira_callback_secret(self):
+    def test_both_reusable_workflows_accept_the_jira_callback_secret(self):
         for workflow in (IMPLEMENT_WORKFLOW, REVIEW_WORKFLOW):
             content = workflow.read_text(encoding="utf-8")
             self.assertIn("CODEX_JIRA_PR_NOTIFY_URL:", content)
-            self.assertIn("required: true", content)
+
+    def test_caller_secrets_may_come_from_the_callers_environments(self):
+        declaration = re.compile(
+            r"(?m)^      (CODEX_[A-Z_]+):\n(?:        description: [^\n]+\n)?        required: (true|false)\n"
+        )
+        for path in sorted((ROOT / "workflows").glob("codex-*.yml")):
+            for secret, required in declaration.findall(path.read_text(encoding="utf-8")):
+                with self.subTest(workflow=path.name, secret=secret):
+                    self.assertEqual(required, "false")
+
+    def test_every_model_job_checks_its_credential_before_codex_runs(self):
+        for path in sorted((ROOT / "workflows").glob("codex-*.yml")):
+            content = path.read_text(encoding="utf-8")
+            runs = [match.start() for match in re.finditer(r"uses: openai/codex-action@", content)]
+            checks = [
+                match.start()
+                for match in re.finditer(r"- name: Check the model credential is available\n", content)
+            ]
+            with self.subTest(workflow=path.name):
+                self.assertEqual(len(checks), len(runs))
+                for check, run in zip(checks, runs):
+                    self.assertLess(check, run)
+                    between = content[check:run]
+                    self.assertIn('if [[ -z "${CODEX_OPENAI_API_KEY}" ]]; then', between)
+                    self.assertIn("exit 1", between)
 
     def test_review_repair_call_preserves_required_read_permissions(self):
         job = workflow_job(REVIEW_WORKFLOW, "repair")

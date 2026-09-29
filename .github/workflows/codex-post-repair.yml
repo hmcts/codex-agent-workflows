@@ -112,11 +112,11 @@ on:
         value: ${{ jobs.publish-published-pr-repair-1.outputs.commit_sha }}
     secrets:
       CODEX_OPENAI_API_KEY:
-        required: true
+        required: false
       CODEX_GITHUB_APP_PRIVATE_KEY:
-        required: true
+        required: false
       CODEX_JIRA_PR_NOTIFY_URL:
-        required: true
+        required: false
 
 jobs:
   repair-published-pr-1-action:
@@ -186,6 +186,14 @@ jobs:
           PLAN_DIR: ${{ runner.temp }}/codex-plan
         run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-repair.sh
 
+      - name: Check the model credential is available
+        env:
+          CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
+        run: |
+          if [[ -z "${CODEX_OPENAI_API_KEY}" ]]; then
+            echo "::error title=Missing model credential::CODEX_OPENAI_API_KEY is empty. Pass it from the caller, or set it in the caller's model environment."
+            exit 1
+          fi
       - name: Run Codex repair
         id: codex-action
         uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1

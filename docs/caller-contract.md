@@ -12,6 +12,8 @@ The initiating display name is used only by trusted collection jobs to add trace
 - `CODEX_GITHUB_APP_PRIVATE_KEY`
 - `CODEX_JIRA_PR_NOTIFY_URL`
 
+A caller either passes these as repository secrets or keeps them only in the environments it names: `CODEX_OPENAI_API_KEY` in `model_environment`, and the App key and `CODEX_JIRA_PR_NOTIFY_URL` in `publisher_environment`. The caller still maps all three; an environment secret takes precedence inside the job that declares that environment. The shared workflows declare them optional so an empty caller value is accepted, and every job that uses one fails immediately if it is still empty.
+
 The shared workflows have no Sonar integration of their own. After publication, the workflow waits for the required Jenkins status and treats the repository's own required Jenkins, Sonar and GitHub status checks as authoritative.
 
 Each trusted publisher job mints a short-lived GitHub App installation token restricted to the caller repository. The App bot identity is verified and derived at runtime; no publisher PAT or stored login is required. Secrets are unavailable to generated code and credential-free verification jobs.

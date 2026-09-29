@@ -64,7 +64,7 @@ on:
         value: ${{ jobs.codex-review-verify.outputs.failure_artifact }}
     secrets:
       CODEX_OPENAI_API_KEY:
-        required: true
+        required: false
 
 permissions:
   contents: read
@@ -123,6 +123,15 @@ jobs:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
         run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-feedback.sh
 
+      - name: Check the model credential is available
+        if: steps.prepare.outputs.prompt_path != ''
+        env:
+          CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
+        run: |
+          if [[ -z "${CODEX_OPENAI_API_KEY}" ]]; then
+            echo "::error title=Missing model credential::CODEX_OPENAI_API_KEY is empty. Pass it from the caller, or set it in the caller's model environment."
+            exit 1
+          fi
       - name: Run Codex on review feedback
         id: codex-action
         if: steps.prepare.outputs.prompt_path != ''

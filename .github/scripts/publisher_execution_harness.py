@@ -1,6 +1,27 @@
 #!/usr/bin/env python3
 
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 from publisher_test_constants import *  # noqa: F403
+
+
+class _JiraCallbackStub(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:  # noqa: N802
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b"{}")
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
+def start_jira_callback_stub() -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _JiraCallbackStub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
 
 
 class PublisherExecutionHarnessMixin:
@@ -186,18 +207,30 @@ class PublisherExecutionHarnessMixin:
                 "GITHUB_OUTPUT": str(github_output),
                 "PR_DRAFT": str(expected_draft).lower(),
             }
+            # The Jira callback is mandatory: an empty URL fails the publish.
+            callback = None
             if fail_notify:
                 env["CODEX_JIRA_PR_NOTIFY_URL"] = "http://127.0.0.1:1/notify"
                 env["CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS"] = "1"
+            else:
+                callback = start_jira_callback_stub()
+                env["CODEX_JIRA_PR_NOTIFY_URL"] = (
+                    f"http://127.0.0.1:{callback.server_port}/notify"
+                )
             if mode == "repair":
                 env["EXPECTED_BRANCH_HEAD_SHA"] = HEAD_SHA
-            completed = subprocess.run(
-                ["bash", str(JIRA_PUBLISHER)],
-                cwd=caller,
-                env=env,
-                capture_output=True,
-                text=True,
-            )
+            try:
+                completed = subprocess.run(
+                    ["bash", str(JIRA_PUBLISHER)],
+                    cwd=caller,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+            finally:
+                if callback is not None:
+                    callback.shutdown()
+                    callback.server_close()
             commands = command_log.read_text(encoding="utf-8") if command_log.exists() else ""
             outputs = github_output.read_text(encoding="utf-8") if github_output.exists() else ""
             return completed, commands, outputs

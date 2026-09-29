@@ -115,10 +115,10 @@ def main() -> int:
     notify_url = _env("CODEX_JIRA_PR_NOTIFY_URL")
     if not notify_url:
         print(
-            "::warning::CODEX_JIRA_PR_NOTIFY_URL is not configured; "
-            "skipping Jira Automation notification."
+            "::error title=Missing Jira callback URL::CODEX_JIRA_PR_NOTIFY_URL is empty. "
+            "Pass it from the caller, or set it in the caller's publisher environment."
         )
-        return 0
+        return 1
 
     payload = build_payload(args)
 
