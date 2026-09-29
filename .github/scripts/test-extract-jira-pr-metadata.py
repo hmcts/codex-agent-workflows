@@ -17,21 +17,44 @@ SPEC.loader.exec_module(MODULE)
 
 class ExtractJiraPrMetadataTest(unittest.TestCase):
     def test_extracts_matching_generated_jira_link(self) -> None:
-        issue_key, issue_url = MODULE.extract_metadata(
-            {
-                "title": "JS-123: Correct juror record",
-                "body": "### Jira link\n\nSee [JS-123](https://tools.hmcts.net/jira/browse/JS-123)\n",
-            }
-        )
-        self.assertEqual(issue_key, "JS-123")
-        self.assertEqual(issue_url, "https://tools.hmcts.net/jira/browse/JS-123")
+        for issue_url in (
+            "https://hmcts.atlassian.net/browse/JS-123",
+            "https://tools.hmcts.net/jira/browse/JS-123",
+        ):
+            with self.subTest(issue_url=issue_url):
+                issue_key, extracted_url = MODULE.extract_metadata(
+                    {
+                        "title": "JS-123: Correct juror record",
+                        "body": f"### Jira link\n\nSee [JS-123]({issue_url})\n",
+                    }
+                )
+                self.assertEqual(issue_key, "JS-123")
+                self.assertEqual(extracted_url, issue_url)
+
+    def test_rejects_links_to_any_other_jira_location(self) -> None:
+        for issue_url in (
+            "https://hmcts.atlassian.net.example/browse/JS-123",
+            "https://other.atlassian.net/browse/JS-123",
+            "http://hmcts.atlassian.net/browse/JS-123",
+            "https://hmcts.atlassian.net/jira/browse/JS-123",
+            "https://tools.hmcts.net/browse/JS-123",
+            "https://hmcts.atlassian.net/browse/JS-123?focusedCommentId=1",
+        ):
+            with self.subTest(issue_url=issue_url):
+                with self.assertRaisesRegex(ValueError, "exactly one trusted Jira link"):
+                    MODULE.extract_metadata(
+                        {
+                            "title": "JS-123: Correct juror record",
+                            "body": f"See [JS-123]({issue_url})",
+                        }
+                    )
 
     def test_rejects_mismatched_link_label_and_url(self) -> None:
         with self.assertRaisesRegex(ValueError, "label and URL key"):
             MODULE.extract_metadata(
                 {
                     "title": "JS-123: Correct juror record",
-                    "body": "See [JS-123](https://tools.hmcts.net/jira/browse/JS-456)",
+                    "body": "See [JS-123](https://hmcts.atlassian.net/browse/JS-456)",
                 }
             )
 
@@ -40,12 +63,12 @@ class ExtractJiraPrMetadataTest(unittest.TestCase):
             MODULE.extract_metadata(
                 {
                     "title": "JS-456: Different work",
-                    "body": "See [JS-123](https://tools.hmcts.net/jira/browse/JS-123)",
+                    "body": "See [JS-123](https://hmcts.atlassian.net/browse/JS-123)",
                 }
             )
 
     def test_rejects_ambiguous_jira_links(self) -> None:
-        link = "See [JS-123](https://tools.hmcts.net/jira/browse/JS-123)"
+        link = "See [JS-123](https://hmcts.atlassian.net/browse/JS-123)"
         with self.assertRaisesRegex(ValueError, "exactly one"):
             MODULE.extract_metadata(
                 {

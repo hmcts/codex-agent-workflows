@@ -25,6 +25,7 @@ class MarkPrFailedTest(unittest.TestCase):
         actual_sha: str = EXPECTED_SHA,
         draft: bool = False,
         notify_jira: bool = False,
+        issue_url: str = "https://hmcts.atlassian.net/browse/JS-123",
     ):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -45,7 +46,7 @@ class MarkPrFailedTest(unittest.TestCase):
                 "title": "JS-123: Correct juror record",
                 "body": (
                     "### Jira link\n\n"
-                    "See [JS-123](https://tools.hmcts.net/jira/browse/JS-123)\n"
+                    f"See [JS-123]({issue_url})\n"
                 ),
                 "head": {
                     "sha": actual_sha,
@@ -156,6 +157,19 @@ class MarkPrFailedTest(unittest.TestCase):
         self.assertNotIn("pr ready", commands)
         self.assertNotIn("pr comment", commands)
 
+    def test_notifies_jira_for_a_pr_raised_before_the_cloud_cutover(self):
+        completed, _, _, jira_payloads = self.run_script(
+            notify_jira=True,
+            issue_url="https://tools.hmcts.net/jira/browse/JS-123",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(len(jira_payloads), 1)
+        self.assertEqual(jira_payloads[0]["issueKey"], "JS-123")
+        self.assertEqual(
+            jira_payloads[0]["issueUrl"],
+            "https://tools.hmcts.net/jira/browse/JS-123",
+        )
+
     def test_notifies_jira_from_generated_pr_metadata(self):
         completed, _, _, jira_payloads = self.run_script(notify_jira=True)
         self.assertEqual(completed.returncode, 0, completed.stderr)
@@ -163,7 +177,7 @@ class MarkPrFailedTest(unittest.TestCase):
         self.assertEqual(jira_payloads[0]["issueKey"], "JS-123")
         self.assertEqual(
             jira_payloads[0]["issueUrl"],
-            "https://tools.hmcts.net/jira/browse/JS-123",
+            "https://hmcts.atlassian.net/browse/JS-123",
         )
         self.assertEqual(
             jira_payloads[0]["prUrl"],
