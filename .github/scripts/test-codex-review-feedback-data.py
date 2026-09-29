@@ -89,72 +89,79 @@ def comment(
     }
 
 
+def writers(*items: dict[str, object]) -> set[str]:
+    return {str(item["user"]["login"]).casefold() for item in items}
+
+
 class ReviewSelectionTests(unittest.TestCase):
-    def test_write_permission_restores_trust_when_membership_is_masked(self):
-        masked_member = review(
-            1,
-            1,
-            "CHANGES_REQUESTED",
-            "2026-08-19T10:00:00Z",
-            login="private-member",
-            association="CONTRIBUTOR",
-        )
-
-        selected, _ = MODULE.select_actionable_review([masked_member], [])
-        self.assertIsNone(selected)
-
-        selected, _ = MODULE.select_actionable_review(
-            [masked_member], [], {"private-member"}
-        )
-        self.assertEqual(selected["id"], 1)
-
-    def test_masked_member_permission_lookup_accepts_only_write_level_access(self):
-        masked_member = review(
-            2,
-            2,
-            "COMMENTED",
-            "2026-08-19T10:00:00Z",
-            login="Private-Member",
-            association="CONTRIBUTOR",
-        )
-
-        for permission, expected in (
-            ("write", {"private-member"}),
-            ("maintain", {"private-member"}),
-            ("admin", {"private-member"}),
-            ("read", set()),
-            ("triage", set()),
-        ):
-            with self.subTest(permission=permission):
-                with mock.patch.object(
-                    MODULE.subprocess,
-                    "run",
-                    return_value=permission_completed(permission),
-                ) as run:
-                    trusted = MODULE.resolve_trusted_logins(
-                        "hmcts/example", [masked_member], []
-                    )
-
-                self.assertEqual(trusted, expected)
-                self.assertEqual(
-                    run.call_args.args[0],
-                    [
-                        "gh",
-                        "api",
-                        "repos/hmcts/example/collaborators/Private-Member/permission",
-                        "--jq",
-                        ".permission",
-                    ],
+    def test_only_verified_writers_are_trusted_whatever_their_association(self):
+        for association in ("MEMBER", "OWNER", "COLLABORATOR", "CONTRIBUTOR", "NONE"):
+            with self.subTest(association=association):
+                feedback = review(
+                    1,
+                    1,
+                    "CHANGES_REQUESTED",
+                    "2026-08-19T10:00:00Z",
+                    login="reviewer",
+                    association=association,
                 )
 
-    def test_permission_lookup_failure_rejects_masked_member(self):
-        masked_member = review(
+                selected, _ = MODULE.select_actionable_review([feedback], [])
+                self.assertIsNone(selected)
+
+                selected, _ = MODULE.select_actionable_review(
+                    [feedback], [], {"reviewer"}
+                )
+                self.assertEqual(selected["id"], 1)
+
+    def test_permission_lookup_accepts_only_write_level_access(self):
+        for association in ("MEMBER", "OWNER", "CONTRIBUTOR"):
+            feedback = review(
+                2,
+                2,
+                "COMMENTED",
+                "2026-08-19T10:00:00Z",
+                login="Reviewer-Two",
+                association=association,
+            )
+            for permission, expected in (
+                ("write", {"reviewer-two"}),
+                ("maintain", {"reviewer-two"}),
+                ("admin", {"reviewer-two"}),
+                ("read", set()),
+                ("triage", set()),
+                ("none", set()),
+            ):
+                with self.subTest(association=association, permission=permission):
+                    with mock.patch.object(
+                        MODULE.subprocess,
+                        "run",
+                        return_value=permission_completed(permission),
+                    ) as run:
+                        trusted = MODULE.resolve_trusted_logins(
+                            "hmcts/example", [feedback], []
+                        )
+
+                    self.assertEqual(trusted, expected)
+                    self.assertEqual(
+                        run.call_args.args[0],
+                        [
+                            "gh",
+                            "api",
+                            "repos/hmcts/example/collaborators/Reviewer-Two/permission",
+                            "--jq",
+                            ".permission",
+                        ],
+                    )
+
+    def test_permission_lookup_failure_rejects_an_organisation_member(self):
+        member = review(
             3,
             3,
             "COMMENTED",
             "2026-08-19T10:00:00Z",
-            login="private-member",
-            association="CONTRIBUTOR",
+            login="member-without-access",
+            association="MEMBER",
         )
         with mock.patch.object(
             MODULE.subprocess,
@@ -163,13 +170,47 @@ class ReviewSelectionTests(unittest.TestCase):
                 "", returncode=1, stderr="HTTP 404: Not Found"
             ),
         ):
-            trusted = MODULE.resolve_trusted_logins(
-                "hmcts/example", [masked_member], []
-            )
+            trusted = MODULE.resolve_trusted_logins("hmcts/example", [member], [])
 
         self.assertEqual(trusted, set())
 
-    def test_masked_inline_comment_requires_write_permission(self):
+    def test_every_candidate_reviewer_and_commenter_is_looked_up(self):
+        feedback = review(
+            5,
+            5,
+            "CHANGES_REQUESTED",
+            "2026-08-19T10:00:00Z",
+            login="member-reviewer",
+            association="MEMBER",
+        )
+        approval = review(
+            6, 6, "APPROVED", "2026-08-19T11:00:00Z", login="approver"
+        )
+        inline = comment(
+            501,
+            5,
+            7,
+            body="owner inline feedback",
+            login="owner-commenter",
+            association="OWNER",
+        )
+        with mock.patch.object(
+            MODULE.subprocess, "run", return_value=permission_completed("write")
+        ) as run:
+            trusted = MODULE.resolve_trusted_logins(
+                "hmcts/example", [feedback, approval], [inline]
+            )
+
+        self.assertEqual(trusted, {"member-reviewer", "owner-commenter"})
+        self.assertEqual(
+            sorted(call.args[0][2] for call in run.call_args_list),
+            [
+                "repos/hmcts/example/collaborators/member-reviewer/permission",
+                "repos/hmcts/example/collaborators/owner-commenter/permission",
+            ],
+        )
+
+    def test_inline_comment_needs_its_own_author_to_be_a_writer(self):
         selected_review = review(
             4,
             4,
@@ -177,22 +218,24 @@ class ReviewSelectionTests(unittest.TestCase):
             "2026-08-19T10:00:00Z",
             body="trusted review body",
         )
-        masked_comment = comment(
+        member_comment = comment(
             401,
             4,
             5,
-            body="private member inline feedback",
-            login="private-member",
-            association="CONTRIBUTOR",
+            body="member inline feedback",
+            login="member-commenter",
+            association="MEMBER",
         )
 
         _, comments = MODULE.select_actionable_review(
-            [selected_review], [masked_comment]
+            [selected_review], [member_comment], writers(selected_review)
         )
         self.assertEqual(comments, [])
 
         _, comments = MODULE.select_actionable_review(
-            [selected_review], [masked_comment], {"private-member"}
+            [selected_review],
+            [member_comment],
+            writers(selected_review, member_comment),
         )
         self.assertEqual([item["id"] for item in comments], [401])
 
@@ -208,7 +251,9 @@ class ReviewSelectionTests(unittest.TestCase):
             ),
         ]
 
-        selected, comments = MODULE.select_actionable_review(reviews, [])
+        selected, comments = MODULE.select_actionable_review(
+            reviews, [], writers(*reviews)
+        )
 
         self.assertIsNone(selected)
         self.assertEqual(comments, [])
@@ -219,7 +264,7 @@ class ReviewSelectionTests(unittest.TestCase):
             review(21, 8, "DISMISSED", "2026-08-19T11:00:00Z"),
         ]
 
-        selected, _ = MODULE.select_actionable_review(reviews, [])
+        selected, _ = MODULE.select_actionable_review(reviews, [], writers(*reviews))
 
         self.assertIsNone(selected)
 
@@ -231,7 +276,7 @@ class ReviewSelectionTests(unittest.TestCase):
             review(33, 3, "CHANGES_REQUESTED", "2026-08-19T11:00:00Z"),
         ]
 
-        selected, _ = MODULE.select_actionable_review(reviews, [])
+        selected, _ = MODULE.select_actionable_review(reviews, [], writers(*reviews))
 
         self.assertEqual(selected["id"], 33)
 
@@ -246,7 +291,9 @@ class ReviewSelectionTests(unittest.TestCase):
             [higher_approval, lower_change],
         ):
             with self.subTest(order=[item["id"] for item in reviews]):
-                selected, _ = MODULE.select_actionable_review(reviews, [])
+                selected, _ = MODULE.select_actionable_review(
+                    reviews, [], writers(*reviews)
+                )
                 self.assertIsNone(selected)
 
     def test_conflicting_duplicate_rank_and_unorderable_state_suppress_reviewer(self):
@@ -261,7 +308,9 @@ class ReviewSelectionTests(unittest.TestCase):
 
         for reviews in (conflicting, malformed_later_state):
             with self.subTest(reviews=reviews):
-                selected, _ = MODULE.select_actionable_review(reviews, [])
+                selected, _ = MODULE.select_actionable_review(
+                    reviews, [], writers(*reviews)
+                )
                 self.assertIsNone(selected)
 
     def test_pending_unsubmitted_review_does_not_supersede_submitted_feedback(self):
@@ -270,7 +319,7 @@ class ReviewSelectionTests(unittest.TestCase):
             review(71, 7, "PENDING", ""),
         ]
 
-        selected, _ = MODULE.select_actionable_review(reviews, [])
+        selected, _ = MODULE.select_actionable_review(reviews, [], writers(*reviews))
 
         self.assertEqual(selected["id"], 70)
 
@@ -300,10 +349,19 @@ class ReviewSelectionTests(unittest.TestCase):
         )
         malformed = comment(804, 80, 11, body="malformed identity")
         malformed["user"] = {"login": "no-stable-id"}
+        member_without_access = comment(
+            805,
+            80,
+            12,
+            body="member without write access",
+            login="member-reader",
+            association="MEMBER",
+        )
 
         selected, comments = MODULE.select_actionable_review(
             [selected_review],
-            [untrusted, missing_association, malformed, trusted],
+            [untrusted, missing_association, malformed, member_without_access, trusted],
+            writers(selected_review, trusted),
         )
 
         self.assertEqual(selected["id"], 80)
@@ -314,6 +372,7 @@ class ReviewSelectionTests(unittest.TestCase):
         self.assertNotIn("untrusted reply", environment)
         self.assertNotIn("missing association", environment)
         self.assertNotIn("malformed identity", environment)
+        self.assertNotIn("member without write access", environment)
 
     def test_multiple_trusted_commenters_preserve_each_attribution(self):
         selected_review = review(
@@ -336,7 +395,7 @@ class ReviewSelectionTests(unittest.TestCase):
         ]
 
         selected, selected_comments = MODULE.select_actionable_review(
-            [selected_review], comments
+            [selected_review], comments, writers(selected_review, *comments)
         )
 
         self.assertEqual(selected["id"], 90)
@@ -388,12 +447,23 @@ class PaginatedCollectionTests(unittest.TestCase):
             comments_output = temporary / "comments.json"
             env_output = temporary / "feedback.env"
             env_output.write_text("SKIP_REASON=''\n", encoding="utf-8")
-            responses = [
-                completed([first_review_page, [latest_review], []]),
-                completed([first_comment_page, [latest_comment], []]),
-            ]
+            collections = iter(
+                [
+                    completed([first_review_page, [latest_review], []]),
+                    completed([first_comment_page, [latest_comment], []]),
+                ]
+            )
+            verified_writers = {"reviewer-1001", "later-page-reviewer"}
 
-            with mock.patch.object(MODULE.subprocess, "run", side_effect=responses) as run:
+            def respond(command, **_kwargs):
+                if command[-1] == ".permission":
+                    login = command[2].split("/")[-2]
+                    return permission_completed(
+                        "write" if login in verified_writers else "read"
+                    )
+                return next(collections)
+
+            with mock.patch.object(MODULE.subprocess, "run", side_effect=respond) as run:
                 status = MODULE.main(
                     [
                         "--repository",
@@ -418,9 +488,12 @@ class PaginatedCollectionTests(unittest.TestCase):
             self.assertIn("newest inline feedback", environment)
             self.assertIn("src/latest.py", environment)
             self.assertIn("Author: @later-page-reviewer (MEMBER)", environment)
-            self.assertEqual(run.call_count, 2)
+            collection_calls = [
+                call for call in run.call_args_list if call.args[0][-1] != ".permission"
+            ]
+            self.assertEqual(len(collection_calls), 2)
             self.assertEqual(
-                run.call_args_list[0].args[0],
+                collection_calls[0].args[0],
                 [
                     "gh",
                     "api",
@@ -430,7 +503,7 @@ class PaginatedCollectionTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(
-                run.call_args_list[1].args[0],
+                collection_calls[1].args[0],
                 [
                     "gh",
                     "api",

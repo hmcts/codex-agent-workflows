@@ -8,9 +8,11 @@ import re
 import sys
 
 
+# Jira Cloud since the September 2026 cutover, and Jira Server for pull
+# requests raised before it.
 JIRA_LINK = re.compile(
     r"See \[(?P<label>[A-Z][A-Z0-9]+-[1-9][0-9]*)\]"
-    r"\((?P<url>https://tools\.hmcts\.net/jira/browse/"
+    r"\((?P<url>https://(?:hmcts\.atlassian\.net|tools\.hmcts\.net/jira)/browse/"
     r"(?P<url_key>[A-Z][A-Z0-9]+-[1-9][0-9]*))\)"
 )
 

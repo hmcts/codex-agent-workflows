@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 
-TRUSTED_ASSOCIATIONS = {"COLLABORATOR", "MEMBER", "OWNER"}
 TRUSTED_PERMISSIONS = {"write", "maintain", "admin"}
 ACTIONABLE_STATES = {"CHANGES_REQUESTED", "COMMENTED"}
 
@@ -62,11 +61,8 @@ def reviewer_login(review: dict[str, Any]) -> str | None:
 def is_trusted_reviewer(
     review: dict[str, Any], trusted_logins: set[str]
 ) -> bool:
-    association = str(review.get("author_association") or "").upper()
     login = reviewer_login(review)
-    return association in TRUSTED_ASSOCIATIONS or (
-        login is not None and login.casefold() in trusted_logins
-    )
+    return login is not None and login.casefold() in trusted_logins
 
 
 def submitted_rank(review: dict[str, Any]) -> tuple[datetime, int] | None:
@@ -144,6 +140,9 @@ def resolve_trusted_logins(
     reviews: list[dict[str, Any]],
     review_comments: list[dict[str, Any]],
 ) -> set[str]:
+    # An author association is not evidence of write access: MEMBER covers
+    # every organisation member. Only reviewers the repository reports as
+    # writers are trusted.
     comments_for_review = {
         review_id
         for comment in review_comments
@@ -159,14 +158,12 @@ def resolve_trusted_logins(
         if state not in ACTIONABLE_STATES or not (body or review_id in comments_for_review):
             continue
         candidate_review_ids.add(review_id)
-        if str(review.get("author_association") or "").upper() not in TRUSTED_ASSOCIATIONS:
-            if login := reviewer_login(review):
-                candidate_logins.add(login)
+        if login := reviewer_login(review):
+            candidate_logins.add(login)
 
     for comment in review_comments:
         review_id = numeric_id(comment.get("pull_request_review_id"))
-        association = str(comment.get("author_association") or "").upper()
-        if review_id not in candidate_review_ids or association in TRUSTED_ASSOCIATIONS:
+        if review_id not in candidate_review_ids:
             continue
         if login := reviewer_login(comment):
             candidate_logins.add(login)

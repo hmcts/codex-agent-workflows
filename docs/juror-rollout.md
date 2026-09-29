@@ -123,6 +123,7 @@ Run one controlled Jira-to-PR test in every repository. Confirm:
 - existing Jenkins, Sonar, functional and smoke checks start normally;
 - Jenkins accepts the App-authored same-repository branch without approving generated workflow or Jenkinsfile changes; any generic `This commit cannot be built` result remains fail-closed and its underlying Jenkins console failure is recorded;
 - a repository collaborator, member or owner can invoke an exact `/codex-review` issue comment on a Codex PR, while review submissions, review comments, non-PR comments, command variants and other author associations cannot invoke it;
+- only reviews and inline review comments from users with write access to the repository reach Codex as feedback, whatever their author association;
 - the issue moves to `Peer Review` and receives `pr-ready` when a PR is created;
 - runner pods contain no OpenAI or publisher credentials;
 - all seven live `master` checkouts pass the exact release-pinned credential safety policy, and their normal PR checks pass;
