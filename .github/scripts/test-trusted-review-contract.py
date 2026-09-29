@@ -126,8 +126,8 @@ jobs:
         self.assertIn('java_version: "17"', trusted_review_wrapper())
 
         mutations = {
-            "reference the trusted HMCTS review workflow at main": trusted_review_wrapper().replace(
-                "@main", f"@{'1' * 40}", 1
+            "40-character SHA": trusted_review_wrapper().replace(
+                f"@{'1' * 40}", "@main", 1
             ),
             "missing required input(s): runner_group": trusted_review_wrapper().replace(
                 "      runner_group: juror-codex\n", "", 1
@@ -229,33 +229,42 @@ jobs:
                     trusted_workflows=trusted,
                 )
 
-    def test_trusted_review_reference_is_main_on_both_branches(self):
-        trusted = {"codex_pr_review.yml": trusted_review_wrapper()}
+    def test_trusted_review_pin_equals_reviewed_default_branch_pin(self):
+        trusted = {"codex_pr_review.yml": trusted_review_wrapper(pin="1" * 40)}
         completed = self.run_check(
-            {"codex_pr_review.yml": trusted_review_wrapper()},
+            {"codex_pr_review.yml": trusted_review_wrapper(pin="1" * 40)},
             trusted_workflows=trusted,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
         for case, pin in {
-            "commit": "1" * 40,
-            "feature branch": "codex/unreviewed",
-            "tag": "v1",
+            "old": "0" * 40,
+            "unreviewed": "2" * 40,
+            "different": "f" * 40,
         }.items():
             with self.subTest(case=case):
                 self.assert_workflows_blocked(
                     {"codex_pr_review.yml": trusted_review_wrapper(pin=pin)},
-                    "must reference the trusted HMCTS review workflow at main",
+                    "must equal the immutable default-branch pin",
                     filename="codex_pr_review.yml",
                     trusted_workflows=trusted,
                 )
 
-        self.assert_workflows_blocked(
-            {"codex_pr_review.yml": trusted_review_wrapper()},
-            "must reference the trusted HMCTS review workflow at main",
-            filename="codex_pr_review.yml",
-            trusted_workflows={"codex_pr_review.yml": trusted_review_wrapper(pin="1" * 40)},
-        )
+    def test_trusted_review_rejects_branch_and_tag_references(self):
+        trusted = {"codex_pr_review.yml": trusted_review_wrapper(pin="1" * 40)}
+        for case, pin in {
+            "default branch": "main",
+            "feature branch": "codex/unreviewed",
+            "tag": "v1",
+            "short SHA": "1" * 12,
+        }.items():
+            with self.subTest(case=case):
+                self.assert_workflows_blocked(
+                    {"codex_pr_review.yml": trusted_review_wrapper(pin=pin)},
+                    "40-character SHA",
+                    filename="codex_pr_review.yml",
+                    trusted_workflows=trusted,
+                )
 
     def test_trusted_review_accepts_caller_environments(self):
         wrapper = trusted_review_wrapper().replace(

@@ -28,7 +28,7 @@ def named_workflow(name: str, body: str, *, trigger: str) -> str:
 def trusted_review_wrapper(
     *, pin: str | None = None, sonar_host_url: str = "https://sonarcloud.io"
 ) -> str:
-    pin = pin or "main"
+    pin = pin or "1" * 40
     return f"""name: Codex PR Review
 on:
   issue_comment:

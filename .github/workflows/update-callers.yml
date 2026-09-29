@@ -1,4 +1,4 @@
-name: Update caller workflows
+name: Update caller workflow pins
 
 on:
   schedule:
@@ -11,12 +11,17 @@ on:
       - .github/scripts/**
       - '.github/workflows/codex-*.yml'
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Shared workflow commit to publish
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: codex-caller-update
+  group: codex-caller-pin-release
   cancel-in-progress: false
 
 jobs:
@@ -35,6 +40,7 @@ jobs:
           - hmcts/juror-scheduler-api
     env:
       TARGET_REPOSITORY: ${{ matrix.repository }}
+      RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
       RUNNER_GROUP: juror-codex
 
     steps:
@@ -66,20 +72,39 @@ jobs:
           CODEX_PUBLISHER_REPOSITORY: ${{ matrix.repository }}
         run: python3 -I .github/scripts/codex-verify-publisher.py
 
-      - name: Raise caller update
+      - name: Verify release identity and revision
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          [[ "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test -n "${GH_TOKEN}"
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_SHA}" >/dev/null
+          merge_base="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/compare/${RELEASE_SHA}...main" \
+              --jq .merge_base_commit.sha
+          )"
+          test "${merge_base}" = "${RELEASE_SHA}"
+
+      - name: Raise caller pin update
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TARGET_BRANCH: master
         run: |
           set -euo pipefail
 
-          branch="codex/use-agent-workflows-main"
+          # One open pin update per caller: a newer release waits until the
+          # open update merges. The legacy branch holds the updates raised
+          # while callers briefly referenced main.
+          branch="codex/update-agent-workflows"
+          legacy_branch="codex/use-agent-workflows-main"
           base_sha="$(gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${TARGET_BRANCH}" --jq .object.sha)"
           update_dir="$RUNNER_TEMP/caller-update"
           release_dir="${update_dir}/release"
           mkdir -p "${release_dir}"
           for shared in codex-implement.yml codex-review-feedback.yml; do
-            gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/${shared}?ref=main" \
+            gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/${shared}?ref=${RELEASE_SHA}" \
               --jq .content | base64 --decode >"${release_dir}/${shared}"
           done
           changed=false
@@ -88,7 +113,7 @@ jobs:
             api_error="${update_dir}/${name}.api-error"
             if ! metadata="$(gh api "repos/${TARGET_REPOSITORY}/contents/${path}?ref=${TARGET_BRANCH}" 2>"${api_error}")"; then
               if python3 -I .github/scripts/is-explicit-contents-404.py "${api_error}"; then
-                echo "${TARGET_REPOSITORY} does not contain ${path}; skipping this update."
+                echo "${TARGET_REPOSITORY} does not contain ${path}; skipping this release."
                 exit 0
               fi
               cat "${api_error}" >&2
@@ -106,6 +131,7 @@ jobs:
             jq -r .content <<<"${metadata}" | base64 --decode >"${input_path}"
             python3 -I .github/scripts/update-caller-workflow.py \
               --workflow "${path}" \
+              --release-sha "${RELEASE_SHA}" \
               --input "${input_path}" \
               --output "${output_path}" \
               --release-workflows "${release_dir}" \
@@ -117,7 +143,7 @@ jobs:
           done
 
           if [[ "${changed}" != "true" ]]; then
-            echo "${TARGET_REPOSITORY} already uses the shared workflows from main."
+            echo "${TARGET_REPOSITORY} already uses ${RELEASE_SHA}."
             exit 0
           fi
 
@@ -139,11 +165,13 @@ jobs:
             --repository-root "${gate_root}" \
             --trusted-repository-root "${gate_root}"
 
-          existing="$(gh pr list --repo "${TARGET_REPOSITORY}" --head "${branch}" --state open --json url --jq '.[0].url // empty')"
-          if [[ -n "${existing}" ]]; then
-            echo "Caller update already open: ${existing}"
-            exit 0
-          fi
+          for open_branch in "${branch}" "${legacy_branch}"; do
+            existing="$(gh pr list --repo "${TARGET_REPOSITORY}" --head "${open_branch}" --state open --json url --jq '.[0].url // empty')"
+            if [[ -n "${existing}" ]]; then
+              echo "Caller update already open: ${existing}"
+              exit 0
+            fi
+          done
 
           if gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${branch}" >/dev/null 2>&1; then
             gh api --method PATCH "repos/${TARGET_REPOSITORY}/git/refs/heads/${branch}" \
@@ -165,15 +193,23 @@ jobs:
             blob_sha="$(cat "${update_dir}/${name}.sha")"
             encoded="$(base64 <"${output_path}" | tr -d '\n')"
             gh api --method PUT "repos/${TARGET_REPOSITORY}/contents/${path}" \
-              -f message="Use the Codex shared workflows from main" \
+              -f message="Update Codex shared workflows to ${RELEASE_SHA:0:12}" \
               -f content="${encoded}" \
               -f sha="${blob_sha}" \
               -f branch="${branch}" >/dev/null
           done
 
+          # Link the shared changes the caller adopts, so reviewers see more
+          # than a changed SHA.
+          current_pin="$(grep -o -E 'codex-implement\.yml@[0-9a-f]{40}' "${update_dir}/codex_jira_dispatch.yml.input" | sed 's/.*@//' || true)"
+          changes=""
+          if [[ -n "${current_pin}" ]]; then
+            changes=" Changes since the current pin: https://github.com/${GITHUB_REPOSITORY}/compare/${current_pin}...${RELEASE_SHA}"
+          fi
+
           gh pr create \
             --repo "${TARGET_REPOSITORY}" \
             --base "${TARGET_BRANCH}" \
             --head "${branch}" \
-            --title "Use the Codex shared workflows from main" \
-            --body "Moves the Juror Codex caller workflows onto \`hmcts/codex-agent-workflows\` at \`main\` and names the \`${RUNNER_GROUP}\` runner group. The caller's workflows as changed here passed the shared credential safety gate before this PR was raised."
+            --title "Update Codex shared workflows to ${RELEASE_SHA:0:12}" \
+            --body "Pins the Juror Codex caller workflows to the reviewed shared release at \`${RELEASE_SHA}\`, adding the \`${RUNNER_GROUP}\` runner group where the release requires it.${changes} The caller's workflows as changed here passed the shared credential safety gate before this PR was raised."

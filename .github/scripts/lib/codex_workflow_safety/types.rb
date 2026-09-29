@@ -66,7 +66,7 @@ TRUSTED_REVIEW_SECRETS = %w[
   CODEX_JIRA_PR_NOTIFY_URL
 ].freeze
 TRUSTED_REVIEW_PREFIX = "hmcts/codex-agent-workflows/.github/workflows/codex-review-feedback.yml@"
-TRUSTED_REVIEW_REFERENCE = %r{\Ahmcts/codex-agent-workflows/\.github/workflows/codex-review-feedback\.yml@main\z}.freeze
+TRUSTED_REVIEW_REFERENCE = %r{\Ahmcts/codex-agent-workflows/\.github/workflows/codex-review-feedback\.yml@[0-9a-f]{40}\z}.freeze
 SECRET_EXPRESSION = /\$\{\{.*?\bsecrets\b.*?\}\}/im.freeze
 GITHUB_EXPRESSION = /\$\{\{/.freeze
 GLOB_MAGIC = /[*?\[\]{}+@]/.freeze
