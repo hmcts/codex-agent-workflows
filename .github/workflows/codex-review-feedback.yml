@@ -36,6 +36,11 @@ on:
         description: Client ID of the HMCTS-owned Codex GitHub App
         required: true
         type: string
+      review_selection:
+        description: "Which feedback /codex-review addresses: latest-review (the newest actionable review from a writer) or current-reviews (every writer review of the current head up to the command, less feedback the reviewer has since approved)"
+        required: false
+        default: latest-review
+        type: string
       required_status_context:
         description: Required post-PR status context
         required: false
@@ -78,6 +83,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Refuse an unknown review selection
+        env:
+          REVIEW_SELECTION: ${{ inputs.review_selection }}
+        run: |
+          case "${REVIEW_SELECTION}" in
+            latest-review|current-reviews) ;;
+            *) echo "::error title=Unknown review selection::review_selection must be latest-review or current-reviews, not '${REVIEW_SELECTION}'."; exit 1 ;;
+          esac
       - name: Checkout shared workflow repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -114,6 +127,7 @@ jobs:
       is_codex_pr: ${{ needs.intake.outputs.is_codex_pr }}
       pr_number: ${{ needs.intake.outputs.pr_number }}
       head_ref: ${{ needs.intake.outputs.head_ref }}
+      review_selection: ${{ inputs.review_selection }}
     secrets:
       CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
 

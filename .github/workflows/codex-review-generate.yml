@@ -28,6 +28,10 @@ on:
         required: false
         default: "21"
         type: string
+      review_selection:
+        required: false
+        default: latest-review
+        type: string
       is_codex_pr:
         required: true
         type: string
@@ -121,6 +125,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          CODEX_REVIEW_SELECTION: ${{ inputs.review_selection }}
         run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-feedback.sh
 
       - name: Check the model credential is available

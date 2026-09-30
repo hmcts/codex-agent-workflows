@@ -16,6 +16,8 @@ from typing import Any
 
 TRUSTED_PERMISSIONS = {"write", "maintain", "admin"}
 ACTIONABLE_STATES = {"CHANGES_REQUESTED", "COMMENTED"}
+SELECTIONS = ("latest-review", "current-reviews")
+MAX_CURRENT_FEEDBACK_BYTES = 64 * 1024
 
 
 class FeedbackDataError(RuntimeError):
@@ -299,6 +301,209 @@ def format_review_environment(
     return "".join(f"{key}={shlex.quote(value)}\n" for key, value in values.items())
 
 
+def parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    timestamp = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def current_candidate_reviews(
+    reviews: list[dict[str, Any]], head_sha: str, command_time: datetime
+) -> list[tuple[tuple[datetime, int], dict[str, Any]]]:
+    """Actionable reviews of the current head, submitted by the time of the
+    command, that the same reviewer has not since approved."""
+    submitted: list[tuple[tuple[datetime, int], tuple[str, object], dict[str, Any]]] = []
+    approvals: dict[tuple[str, object], tuple[datetime, int]] = {}
+    for review in reviews:
+        identity = reviewer_identity(review)
+        rank = submitted_rank(review)
+        if identity is None or rank is None or rank[0] > command_time:
+            continue
+        submitted.append((rank, identity, review))
+        if str(review.get("state") or "").upper() == "APPROVED":
+            if identity not in approvals or rank > approvals[identity]:
+                approvals[identity] = rank
+
+    candidates = []
+    for rank, identity, review in sorted(submitted, key=lambda item: item[0]):
+        if str(review.get("state") or "").upper() not in ACTIONABLE_STATES:
+            continue
+        if identity in approvals and rank < approvals[identity]:
+            continue
+        if review.get("commit_id") != head_sha:
+            continue
+        candidates.append((rank, review))
+    return candidates
+
+
+def current_review_comments(
+    review_comments: list[dict[str, Any]],
+    review_ids: set[int],
+    head_sha: str,
+    command_time: datetime,
+) -> list[dict[str, Any]]:
+    """Inline comments of the given reviews that still apply to the current
+    head and were neither written nor edited after the command."""
+    current = []
+    for comment in review_comments:
+        if numeric_id(comment.get("pull_request_review_id")) not in review_ids:
+            continue
+        if comment.get("commit_id") != head_sha:
+            continue
+        created = parse_timestamp(comment.get("created_at"))
+        updated = parse_timestamp(comment.get("updated_at") or comment.get("created_at"))
+        if created is None or updated is None or created > command_time or updated > command_time:
+            continue
+        if (
+            comment.get("line") is None
+            and comment.get("position") is None
+            and comment.get("subject_type") != "file"
+        ):
+            continue
+        current.append(comment)
+    return current
+
+
+def resolve_current_trusted_logins(
+    repository: str,
+    candidates: list[tuple[tuple[datetime, int], dict[str, Any]]],
+    review_comments: list[dict[str, Any]],
+    head_sha: str,
+    command_time: datetime,
+) -> set[str]:
+    review_ids = {rank[1] for rank, _ in candidates}
+    logins = {login for _, review in candidates if (login := reviewer_login(review))}
+    for comment in current_review_comments(review_comments, review_ids, head_sha, command_time):
+        if login := reviewer_login(comment):
+            logins.add(login)
+    trusted_logins: set[str] = set()
+    for login in sorted(logins, key=str.casefold):
+        if fetch_repository_permission(repository, login) in TRUSTED_PERMISSIONS:
+            trusted_logins.add(login.casefold())
+    return trusted_logins
+
+
+def select_current_reviews(
+    reviews: list[dict[str, Any]],
+    review_comments: list[dict[str, Any]],
+    trusted_logins: set[str],
+    head_sha: str,
+    command_time: datetime,
+) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
+    trusted = [
+        (rank, review)
+        for rank, review in current_candidate_reviews(reviews, head_sha, command_time)
+        if is_trusted_reviewer(review, trusted_logins)
+    ]
+    review_ids = {rank[1] for rank, _ in trusted}
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for comment in current_review_comments(review_comments, review_ids, head_sha, command_time):
+        if is_trusted_reviewer(comment, trusted_logins):
+            grouped.setdefault(numeric_id(comment.get("pull_request_review_id")), []).append(comment)
+
+    selected = []
+    for rank, review in trusted:
+        comments = grouped.get(rank[1], [])
+        if str(review.get("body") or "").strip() or comments:
+            selected.append((review, comments))
+    return selected
+
+
+def format_current_environment(
+    selected: list[tuple[dict[str, Any], list[dict[str, Any]]]],
+    command_author: str,
+    command_url: str,
+    head_sha: str,
+) -> str:
+    if not selected:
+        reason = "no current trusted review feedback was found on the PR head"
+        return f"SKIP_REASON={shlex.quote(reason)}\n"
+
+    blocks = []
+    for review_index, (review, comments) in enumerate(selected, start=1):
+        user = review.get("user") if isinstance(review.get("user"), dict) else {}
+        parts = [
+            f"Review {review_index}:",
+            f"Author: @{str(user.get('login') or '').strip()}",
+            f"State: {str(review.get('state') or '').upper()}",
+        ]
+        if url := str(review.get("html_url") or "").strip():
+            parts.append(f"URL: {url}")
+        if body := str(review.get("body") or "").strip():
+            parts.append(f"Review body:\n{body}")
+        for comment_index, comment in enumerate(comments, start=1):
+            commenter = comment.get("user") if isinstance(comment.get("user"), dict) else {}
+            parts.append(f"Inline comment {review_index}.{comment_index}:")
+            parts.append(f"Author: @{str(commenter.get('login') or '').strip()}")
+            if url := str(comment.get("html_url") or "").strip():
+                parts.append(f"URL: {url}")
+            if path := str(comment.get("path") or "").strip():
+                parts.append(f"File path: {path}")
+            if diff_hunk := str(comment.get("diff_hunk") or "").strip():
+                parts.append(f"Diff hunk:\n{diff_hunk}")
+            if body := str(comment.get("body") or "").strip():
+                parts.append(f"Comment:\n{body}")
+        blocks.append("\n".join(parts))
+
+    review_text = "\n\n".join(blocks)
+    if len(review_text.encode("utf-8")) > MAX_CURRENT_FEEDBACK_BYTES:
+        raise FeedbackDataError(
+            "current review feedback exceeds the 64 KiB prompt limit; resolve some of it before retrying"
+        )
+    values = {
+        "COMMENT_KIND": "pull_request_reviews",
+        "COMMENT_AUTHOR": command_author,
+        "COMMENT_BODY": f"Address the feedback in all {len(selected)} review(s) listed below.",
+        "COMMENT_URL": command_url,
+        "REVIEW_STATE": "",
+        "REVIEW_ID": "",
+        "REVIEW_COMMENTS": review_text,
+        "REVIEW_HEAD_SHA": head_sha,
+    }
+    return "".join(f"{key}={shlex.quote(value)}\n" for key, value in values.items())
+
+
+def fetch_head_sha(repository: str, pr_number: str) -> str:
+    completed = subprocess.run(
+        ["gh", "api", f"repos/{repository}/pulls/{pr_number}", "--jq", ".head.sha"],
+        capture_output=True,
+        text=True,
+    )
+    head_sha = completed.stdout.strip()
+    if completed.returncode != 0 or len(head_sha) != 40 or any(
+        character not in "0123456789abcdef" for character in head_sha
+    ):
+        raise FeedbackDataError("GitHub API did not return the pull request head revision")
+    return head_sha
+
+
+def collect_current_reviews(
+    args: argparse.Namespace,
+    reviews: list[dict[str, Any]],
+    comments: list[dict[str, Any]],
+) -> str:
+    command_time = parse_timestamp(args.command_created_at)
+    if command_time is None or not args.command_author:
+        raise FeedbackDataError("the /codex-review command time and author are required")
+    if fetch_repository_permission(args.repository, args.command_author) not in TRUSTED_PERMISSIONS:
+        reason = "the /codex-review author does not have write access to this repository"
+        return f"SKIP_REASON={shlex.quote(reason)}\n"
+    head_sha = fetch_head_sha(args.repository, args.pr_number)
+    candidates = current_candidate_reviews(reviews, head_sha, command_time)
+    trusted_logins = resolve_current_trusted_logins(
+        args.repository, candidates, comments, head_sha, command_time
+    )
+    selected = select_current_reviews(reviews, comments, trusted_logins, head_sha, command_time)
+    return format_current_environment(selected, args.command_author, args.command_url, head_sha)
+
+
 def write_json_atomic(path: Path, records: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -319,6 +524,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--reviews-output", type=Path, required=True)
     parser.add_argument("--comments-output", type=Path, required=True)
     parser.add_argument("--env-output", type=Path, required=True)
+    parser.add_argument("--selection", choices=SELECTIONS, default="latest-review")
+    parser.add_argument("--command-author", default="")
+    parser.add_argument("--command-url", default="")
+    parser.add_argument("--command-created-at", default="")
     return parser.parse_args(argv)
 
 
@@ -327,11 +536,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         reviews = fetch_api_collection(args.repository, args.pr_number, "reviews")
         comments = fetch_api_collection(args.repository, args.pr_number, "comments")
-        trusted_logins = resolve_trusted_logins(args.repository, reviews, comments)
-        selected_review, selected_comments = select_actionable_review(
-            reviews, comments, trusted_logins
-        )
-        environment = format_review_environment(selected_review, selected_comments)
+        if args.selection == "current-reviews":
+            environment = collect_current_reviews(args, reviews, comments)
+        else:
+            trusted_logins = resolve_trusted_logins(args.repository, reviews, comments)
+            selected_review, selected_comments = select_actionable_review(
+                reviews, comments, trusted_logins
+            )
+            environment = format_review_environment(selected_review, selected_comments)
 
         write_json_atomic(args.reviews_output, reviews)
         write_json_atomic(args.comments_output, comments)
