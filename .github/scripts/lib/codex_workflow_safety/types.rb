@@ -50,6 +50,8 @@ TRUSTED_REVIEW_INPUTS = %w[
   required_status_poll_seconds
   required_status_timeout_seconds
   jira_notify_timeout_seconds
+  publish_policy
+  cannot_be_built
 ].freeze
 REQUIRED_TRUSTED_REVIEW_INPUTS = %w[
   runner_group

@@ -63,6 +63,10 @@ on:
       latest_failure_artifact:
         required: true
         type: string
+      publish_policy:
+        required: false
+        default: draft-on-failure
+        type: string
     outputs:
       branch_name:
         value: ${{ jobs.publish-pr.outputs.branch_name || jobs.publish-draft-pr.outputs.branch_name }}
@@ -89,7 +93,8 @@ jobs:
     if: |
       always() &&
       inputs.has_changes == 'true' &&
-      inputs.verification_passed != 'true'
+      inputs.verification_passed != 'true' &&
+      inputs.publish_policy != 'verified-only'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions: {}
@@ -189,7 +194,7 @@ jobs:
   publish-draft-pr:
     environment: ${{ inputs.publisher_environment }}
     needs: prepare-draft-publication
-    if: always() && needs.prepare-draft-publication.outputs.available == 'true'
+    if: always() && needs.prepare-draft-publication.outputs.available == 'true' && inputs.publish_policy != 'verified-only'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -553,6 +558,7 @@ jobs:
         uses: $/.github/actions/runtime
 
       - name: Notify Jira that no patch could be published
+        if: inputs.publish_policy != 'verified-only'
         continue-on-error: true
         env:
           RECOVERY_AVAILABLE: ${{ needs.prepare-draft-publication.outputs.available }}

@@ -718,5 +718,122 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("/compare/${current_pin}...${RELEASE_SHA}", content)
 
 
+    POLICY_IF = "if: inputs.publish_policy != 'verified-only'"
+
+    @staticmethod
+    def job_text(workflow_name: str, job: str) -> str:
+        content = (ROOT / "workflows" / workflow_name).read_text(encoding="utf-8")
+        start = content.index(f"\n  {job}:\n")
+        following = re.search(r"\n  [A-Za-z0-9_-]+:\n", content[start + 1 :])
+        return content[start : start + 1 + following.start()] if following else content[start:]
+
+    @staticmethod
+    def step_text(job_text: str, step: str) -> str:
+        start = job_text.index(f"      - name: {step}\n")
+        following = job_text.find("\n      - name: ", start + 1)
+        return job_text[start : following if following != -1 else len(job_text)]
+
+    def test_publication_policies_default_to_the_current_behaviour(self):
+        for workflow in (IMPLEMENT_WORKFLOW, REVIEW_WORKFLOW):
+            content = workflow.read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow.name):
+                self.assertRegex(content, r"(?m)^      publish_policy:\n(?:        [^\n]+\n)*?        default: draft-on-failure\n")
+                self.assertRegex(content, r"(?m)^      cannot_be_built:\n(?:        [^\n]+\n)*?        default: stop\n")
+                check = self.step_text(
+                    self.job_text(workflow.name, "validate-runner-target"),
+                    "Refuse an unknown publication policy",
+                )
+                self.assertIn("draft-on-failure|verified-only) ;;", check)
+                self.assertIn("stop|repair) ;;", check)
+
+    def test_entry_workflows_forward_the_publication_policies(self):
+        forwarded = {
+            IMPLEMENT_WORKFLOW: {
+                "plan": ["publish_policy"],
+                "generate": ["publish_policy"],
+                "publish": ["publish_policy"],
+                "repair-published-pr": ["publish_policy", "cannot_be_built"],
+            },
+            REVIEW_WORKFLOW: {
+                "repair": ["publish_policy", "cannot_be_built"],
+                "terminal-failure": ["publish_policy"],
+            },
+        }
+        for workflow, jobs in forwarded.items():
+            for job, names in jobs.items():
+                for name in names:
+                    with self.subTest(workflow=workflow.name, job=job, input=name):
+                        self.assertIn(
+                            f"      {name}: ${{{{ inputs.{name} }}}}\n", self.job_text(workflow.name, job)
+                        )
+
+    def test_verified_only_publishes_no_draft_and_reports_only_pr_created(self):
+        self.assertIn(
+            "inputs.publish_policy != 'verified-only'",
+            self.job_text("codex-publish.yml", "prepare-draft-publication").split("runs-on:")[0],
+        )
+        self.assertIn(
+            "&& inputs.publish_policy != 'verified-only'\n",
+            self.job_text("codex-publish.yml", "publish-draft-pr").split("runs-on:")[0],
+        )
+        self.assertNotIn("verified-only", self.job_text("codex-publish.yml", "publish-pr"))
+        for workflow_name, job, step in (
+            ("codex-plan.yml", "codex-plan-failed", "Notify Jira that planning failed"),
+            ("codex-plan.yml", "codex-plan-blocked", "Notify Jira that implementation is blocked"),
+            ("codex-generate.yml", "codex-generation-terminal-failed", "Notify Jira that implementation generation failed"),
+            ("codex-generate.yml", "codex-no-changes", "Notify Jira that no repository changes are required"),
+            ("codex-publish.yml", "codex-prepublication-terminal-failed", "Notify Jira that no patch could be published"),
+        ):
+            with self.subTest(workflow=workflow_name, step=step):
+                self.assertIn(self.POLICY_IF, self.step_text(self.job_text(workflow_name, job), step))
+
+    def test_verified_only_fails_a_broken_pr_without_drafting_it(self):
+        for workflow_name, job, gated, failing in (
+            (
+                "codex-post-repair.yml",
+                "codex-published-pr-verification-failed",
+                ["Create GitHub App installation token", "Verify GitHub App publisher",
+                 "Download final verification failure", "Return failed pull request to draft"],
+                "Fail after published PR repair attempt",
+            ),
+            (
+                "codex-review-terminal.yml",
+                "codex-review-prepublication-verification-failed",
+                ["Create GitHub App installation token", "Verify GitHub App publisher",
+                 "Download review verification failure", "Return pull request to draft and notify Jira"],
+                "Fail after pre-publication verification failure",
+            ),
+            (
+                "codex-review-repair.yml",
+                "codex-review-external-verification-failed",
+                ["Create GitHub App installation token", "Verify GitHub App publisher",
+                 "Download final verification failure", "Return failed pull request to draft"],
+                "Fail after bounded external-status repair",
+            ),
+        ):
+            job_text = self.job_text(workflow_name, job)
+            for step in gated:
+                with self.subTest(workflow=workflow_name, step=step):
+                    self.assertIn(self.POLICY_IF, self.step_text(job_text, step))
+            with self.subTest(workflow=workflow_name, step=failing):
+                self.assertNotIn("if:", self.step_text(job_text, failing).split("\n        run:")[0])
+
+    def test_cannot_be_built_repair_is_opt_in(self):
+        clause = (
+            "(inputs.initial_failure_class == 'implementation' || "
+            "inputs.cannot_be_built == 'repair' && inputs.initial_failure_class == 'no-build')"
+        )
+        for workflow_name in ("codex-post-repair.yml", "codex-review-repair.yml"):
+            content = (ROOT / "workflows" / workflow_name).read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow_name):
+                self.assertIn(clause, content)
+                self.assertNotIn("&& inputs.initial_failure_class == 'implementation'\n", content)
+                self.assertIn(
+                    "inputs.initial_failure_class == 'no-build' && inputs.cannot_be_built != 'repair' && "
+                    "'Required Jenkins status reported that this commit cannot be built; no automated repair was attempted.'",
+                    content,
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

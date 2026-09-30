@@ -27,7 +27,7 @@ PLAN_DETAIL = "Sensitive Jira-derived planning detail must remain private."
 
 
 class CodexPlanHandoffTest(unittest.TestCase):
-    def make_plan(self) -> Path:
+    def make_plan(self, **overrides: object) -> Path:
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
         plan_dir = Path(temp_dir.name)
@@ -54,6 +54,7 @@ class CodexPlanHandoffTest(unittest.TestCase):
             "assumptions": [],
             "blockers": [],
         }
+        plan.update(overrides)
         plan_bytes = (json.dumps(plan, indent=2, sort_keys=True) + "\n").encode("utf-8")
         (plan_dir / "plan.json").write_bytes(plan_bytes)
         (plan_dir / "plan.sha256").write_text(
@@ -208,6 +209,32 @@ class CodexPlanHandoffTest(unittest.TestCase):
         self.assertEqual(pr_body.count("### Automation request"), 1)
         self.assertFalse((output_dir / "plan.json").exists())
         self.assertFalse((output_dir / "allowed-paths.txt").exists())
+
+    def test_public_pr_body_keeps_only_the_plan_review_flags(self) -> None:
+        plan_dir = self.make_plan(
+            risk_level="high",
+            cross_system_change=True,
+            affected_systems=["internal-case-store"],
+            assumptions=["The legacy export job still runs nightly."],
+            risks=["A partial batch could leave jurors unsummoned."],
+        )
+        completed, output_dir = self.run_collector(plan_dir, "jira-generate", PATCH)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        pr_body = (output_dir / "codex-pr-body.md").read_text(encoding="utf-8")
+        self.assertIn("### Review flags", pr_body)
+        self.assertIn("Risk level: **high**", pr_body)
+        self.assertIn("Cross-system change: **yes**", pr_body)
+        self.assertIn("Prominent reviewer flag", pr_body)
+        for private in (
+            "#### Affected systems",
+            "#### Assumptions",
+            "#### Risks",
+            "internal-case-store",
+            "The legacy export job still runs nightly.",
+            "A partial batch could leave jurors unsummoned.",
+        ):
+            with self.subTest(private=private):
+                self.assertNotIn(private, pr_body)
         self.assertFalse((output_dir / "codex-final-message.md").exists())
         self.assertFalse((output_dir / "codex-summary.txt").exists())
         self.assertFalse((output_dir / "codex-testing.txt").exists())

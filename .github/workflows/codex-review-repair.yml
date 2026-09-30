@@ -77,6 +77,14 @@ on:
       initial_failure_artifact:
         required: true
         type: string
+      publish_policy:
+        required: false
+        default: draft-on-failure
+        type: string
+      cannot_be_built:
+        required: false
+        default: stop
+        type: string
     outputs:
       passed:
         value: ${{ jobs.verify-review-status-repair.outputs.passed }}
@@ -95,7 +103,7 @@ permissions:
 
 jobs:
   prepare-published-review-repair-source:
-    if: always() && inputs.initial_passed == 'false' && inputs.initial_failure_class == 'implementation'
+    if: always() && inputs.initial_passed == 'false' && (inputs.initial_failure_class == 'implementation' || inputs.cannot_be_built == 'repair' && inputs.initial_failure_class == 'no-build')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -602,7 +610,7 @@ jobs:
       PR_NUMBER: ${{ needs.codex-review-external-republish.outputs.pr_number || inputs.pr_number }}
       EXPECTED_HEAD_SHA: ${{ needs.codex-review-external-republish.outputs.commit_sha || inputs.published_commit_sha }}
       FAILURE_ARTIFACT: ${{ needs.verify-review-status-repair.outputs.failure_artifact || needs.codex-review-external-repair-verify.outputs.failure_artifact || inputs.initial_failure_artifact }}
-      FAILURE_MESSAGE: ${{ inputs.initial_failure_class == 'no-build' && 'Required Jenkins status reported that this commit cannot be built; no automated repair was attempted.' || inputs.initial_failure_class == 'environment' && 'Credential-free verification was blocked by runner infrastructure; no automated repair was attempted.' || 'Required Jenkins or credential-free verification failed after the available automated review-feedback repair attempt.' }}
+      FAILURE_MESSAGE: ${{ inputs.initial_failure_class == 'no-build' && inputs.cannot_be_built != 'repair' && 'Required Jenkins status reported that this commit cannot be built; no automated repair was attempted.' || inputs.initial_failure_class == 'environment' && 'Credential-free verification was blocked by runner infrastructure; no automated repair was attempted.' || 'Required Jenkins or credential-free verification failed after the available automated review-feedback repair attempt.' }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
       CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
     steps:
@@ -610,6 +618,7 @@ jobs:
         uses: $/.github/actions/runtime
 
       - name: Create GitHub App installation token
+        if: inputs.publish_policy != 'verified-only'
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
@@ -623,6 +632,7 @@ jobs:
           permission-workflows: write
 
       - name: Verify GitHub App publisher
+        if: inputs.publish_policy != 'verified-only'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
@@ -630,6 +640,7 @@ jobs:
         run: python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/codex-verify-publisher.py
 
       - name: Download final verification failure
+        if: inputs.publish_policy != 'verified-only'
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -637,6 +648,7 @@ jobs:
           path: ${{ runner.temp }}/codex-review-terminal-failure
 
       - name: Return failed pull request to draft
+        if: inputs.publish_policy != 'verified-only'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           FAILURE_DIR: ${{ runner.temp }}/codex-review-terminal-failure

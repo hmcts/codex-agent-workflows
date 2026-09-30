@@ -6,6 +6,19 @@ The caller forwards Jira issue key, summary, description, status, assignee and U
 
 The initiating display name is used only by trusted collection jobs to add traceability to the PR body. It is not included in model prompts. Missing or invalid values render as `Not supplied by Jira Automation`; callers must not substitute the assignee or reporter.
 
+## Optional publication policies
+
+Both reusable workflows take two optional inputs. The defaults keep the current behaviour.
+
+- `publish_policy`: `draft-on-failure` (default) or `verified-only`.
+  - With `draft-on-failure`, work that fails verification is published as a draft PR, and Jira hears about every outcome: `pr-created`, `draft-pr-created`, blocked, no changes and failed.
+  - With `verified-only`, only verified work is published and Jira hears only `pr-created`. A plan that is blocked, verification that fails, or a published PR that fails its required status after the repair attempt ends the run as failed, without a draft PR, a draft conversion or a Jira failure callback.
+- `cannot_be_built`: `stop` (default) or `repair`.
+  - With `stop`, a required status reporting that the commit cannot be built ends the run without a repair.
+  - With `repair`, the post-PR repair attempt is spent on it.
+
+Any other value fails the run before anything else starts.
+
 ## Required secrets
 
 - `CODEX_OPENAI_API_KEY`

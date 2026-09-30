@@ -65,6 +65,10 @@ on:
       plan_trusted_sha:
         required: true
         type: string
+      publish_policy:
+        required: false
+        default: draft-on-failure
+        type: string
     outputs:
       source_artifact:
         value: ${{ jobs.prepare-codex-verification-source.outputs.artifact }}
@@ -290,6 +294,7 @@ jobs:
         uses: $/.github/actions/runtime
 
       - name: Notify Jira that implementation generation failed
+        if: inputs.publish_policy != 'verified-only'
         continue-on-error: true
         env:
           ACTION_OUTCOME: ${{ needs.codex-generate-action.result }}
@@ -320,6 +325,7 @@ jobs:
         uses: $/.github/actions/runtime
 
       - name: Notify Jira that no repository changes are required
+        if: inputs.publish_policy != 'verified-only'
         run: |
           python3 -I ${CODEX_RUNTIME_PATH}/.github/scripts/notify-jira-automation.py \
             --status no-changes \

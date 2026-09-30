@@ -50,6 +50,10 @@ on:
         required: false
         default: "10"
         type: string
+      publish_policy:
+        required: false
+        default: draft-on-failure
+        type: string
     outputs:
       ready_to_implement:
         value: ${{ jobs.validate-codex-plan.outputs.ready_to_implement }}
@@ -226,6 +230,7 @@ jobs:
         uses: $/.github/actions/runtime
 
       - name: Notify Jira that planning failed
+        if: inputs.publish_policy != 'verified-only'
         continue-on-error: true
         env:
           PLANNER_RESULT: ${{ needs.codex-plan-action.result }}
@@ -270,6 +275,7 @@ jobs:
         uses: $/.github/actions/runtime
 
       - name: Notify Jira that implementation is blocked
+        if: inputs.publish_policy != 'verified-only'
         continue-on-error: true
         env:
           BLOCKERS_SUMMARY: ${{ needs.validate-codex-plan.outputs.blockers_summary }}

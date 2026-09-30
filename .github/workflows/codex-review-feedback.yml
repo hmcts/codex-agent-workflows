@@ -56,6 +56,16 @@ on:
         required: false
         default: "10"
         type: string
+      publish_policy:
+        description: "draft-on-failure publishes unverified work as a draft PR and reports every outcome to Jira; verified-only publishes only verified work and reports only pr-created"
+        required: false
+        default: draft-on-failure
+        type: string
+      cannot_be_built:
+        description: "What to do when the required status reports that the commit cannot be built: stop, or repair (spend the post-PR repair on it)"
+        required: false
+        default: stop
+        type: string
     secrets:
       CODEX_OPENAI_API_KEY:
         description: Pass it from the caller, or leave it empty when the caller's model environment holds it. The job that uses it fails if it is empty.
@@ -87,6 +97,19 @@ jobs:
           RUNNER_GROUP: ${{ inputs.runner_group }}
           RUNNER_LABEL: ${{ inputs.runner_label }}
         run: python3 -I .github/scripts/validate-runner-target.py
+      - name: Refuse an unknown publication policy
+        env:
+          PUBLISH_POLICY: ${{ inputs.publish_policy }}
+          CANNOT_BE_BUILT: ${{ inputs.cannot_be_built }}
+        run: |
+          case "${PUBLISH_POLICY}" in
+            draft-on-failure|verified-only) ;;
+            *) echo "::error title=Unknown publication policy::publish_policy must be draft-on-failure or verified-only, not '${PUBLISH_POLICY}'."; exit 1 ;;
+          esac
+          case "${CANNOT_BE_BUILT}" in
+            stop|repair) ;;
+            *) echo "::error title=Unknown cannot-be-built policy::cannot_be_built must be stop or repair, not '${CANNOT_BE_BUILT}'."; exit 1 ;;
+          esac
 
   intake:
     needs: validate-runner-target
@@ -151,6 +174,8 @@ jobs:
     with:
       model_environment: ${{ inputs.model_environment }}
       publisher_environment: ${{ inputs.publisher_environment }}
+      publish_policy: ${{ inputs.publish_policy }}
+      cannot_be_built: ${{ inputs.cannot_be_built }}
       runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
@@ -185,6 +210,7 @@ jobs:
     with:
       model_environment: ${{ inputs.model_environment }}
       publisher_environment: ${{ inputs.publisher_environment }}
+      publish_policy: ${{ inputs.publish_policy }}
       github_app_client_id: ${{ inputs.github_app_client_id }}
       jira_notify_timeout_seconds: ${{ inputs.jira_notify_timeout_seconds }}
       is_codex_pr: ${{ needs.intake.outputs.is_codex_pr }}
