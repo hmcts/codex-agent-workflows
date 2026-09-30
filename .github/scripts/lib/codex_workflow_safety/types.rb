@@ -23,6 +23,14 @@ OPAQUE_REVISION_EVENTS = %w[
   check_suite
   status
 ].freeze
+# github.head_ref names the pull request's source branch only on these events.
+HEAD_REF_EVENTS = %w[pull_request pull_request_target].freeze
+# A job with exactly this condition never runs for a generated codex/** pull
+# request, so it is not reachable when HEAD_REF_EVENTS alone expose its workflow.
+GENERATED_PR_SKIP_CONDITIONS = [
+  "${{ !startsWith(github.head_ref, 'codex/') }}",
+  "!startsWith(github.head_ref, 'codex/')",
+].freeze
 PROTECTED_EVENT_FILTERS = {
   "pull_request" => %w[types branches branches-ignore paths paths-ignore],
   "pull_request_target" => %w[types branches branches-ignore paths paths-ignore],

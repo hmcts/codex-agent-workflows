@@ -104,7 +104,23 @@ def effective_job_writes!(job, job_location, workflow_permissions)
   end
 end
 
-def enforce_policy!(entry, entries, inherited_permissions = nil, stack = [])
+# The skip condition protects a job only when every event that exposes its
+# workflow sets github.head_ref to the generated branch. A generated push, a
+# comment, a check event or a workflow_run hop would still reach the job.
+def generated_pr_skip_applies?(workflow)
+  events = trigger_events(workflow["on"])
+  return false if events.key?("workflow_run")
+
+  exposing = (BRANCH_REVISION_EVENTS + OPAQUE_REVISION_EVENTS).select { |event| events.key?(event) }
+  exposing << "push" if events.key?("push") && push_may_run_generated_branch?(events["push"])
+  !exposing.empty? && (exposing - HEAD_REF_EVENTS).empty?
+end
+
+def skips_generated_pull_requests?(job)
+  job.is_a?(Hash) && job["if"].is_a?(String) && GENERATED_PR_SKIP_CONDITIONS.include?(job["if"].strip)
+end
+
+def enforce_policy!(entry, entries, inherited_permissions = nil, stack = [], skip_generated_prs: false)
   if stack.include?(entry.relative_path)
     cycle = (stack + [entry.relative_path]).join(" -> ")
     raise WorkflowSafetyError, "reusable workflow cycle detected: #{cycle}"
@@ -112,12 +128,18 @@ def enforce_policy!(entry, entries, inherited_permissions = nil, stack = [])
   stack = stack + [entry.relative_path]
   workflow = entry.workflow
 
-  secret_location = find_secret_reference(workflow, "workflow")
+  jobs = workflow["jobs"]
+  reachable_jobs = jobs
+  if skip_generated_prs && jobs.is_a?(Hash)
+    reachable_jobs = jobs.reject { |_job_name, job| skips_generated_pull_requests?(job) }
+  end
+  scanned = reachable_jobs.equal?(jobs) ? workflow : workflow.merge("jobs" => reachable_jobs)
+
+  secret_location = find_secret_reference(scanned, "workflow")
   if secret_location
     raise WorkflowSafetyError, "#{secret_location} references the secrets context"
   end
 
-  jobs = workflow["jobs"]
   unless jobs.is_a?(Hash) && !jobs.empty?
     raise WorkflowSafetyError, "protected workflow jobs must be a non-empty mapping"
   end
@@ -128,7 +150,7 @@ def enforce_policy!(entry, entries, inherited_permissions = nil, stack = [])
                            inherited_permissions
                          end
 
-  jobs.each do |job_name, job|
+  reachable_jobs.each do |job_name, job|
     location = "jobs.#{job_name}"
     unless job.is_a?(Hash)
       raise WorkflowSafetyError, "#{location} must be a mapping"
@@ -155,7 +177,7 @@ def enforce_policy!(entry, entries, inherited_permissions = nil, stack = [])
     if has_uses
       validate_reusable_secrets!(job, location)
       target = resolve_local_workflow!(job["uses"], entries, location)
-      enforce_policy!(target, entries, effective_writes, stack)
+      enforce_policy!(target, entries, effective_writes, stack, skip_generated_prs: skip_generated_prs)
     else
       unless job["steps"].is_a?(Array)
         raise WorkflowSafetyError, "#{location}.steps must be a sequence"
