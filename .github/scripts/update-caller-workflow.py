@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update and validate a Juror caller's shared-workflow contract."""
+"""Update and validate a caller's shared-workflow contract."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from pathlib import Path
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 RUNNER_GROUP_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 RUNNER_GROUP_INPUT = "runner_group"
+ENVIRONMENT_INPUTS = ("model_environment", "publisher_environment")
+ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 USES_PATTERN = re.compile(
     r"(?m)^(?P<indent>[ \t]*)uses:\s*"
     r"hmcts/codex-agent-workflows/\.github/workflows/"
@@ -233,6 +235,7 @@ def update_caller(
     requires_runner_group: bool = False,
     runner_group: str | None = None,
     remove_inputs: tuple[str, ...] = (),
+    environments: dict[str, str] | None = None,
 ) -> str:
     if filename not in WORKFLOW_CONTRACTS:
         raise CallerContractError(f"unsupported caller workflow: {filename}")
@@ -304,6 +307,30 @@ def update_caller(
         del lines[retired_line]
         with_end -= 1
 
+    # A caller that keeps its Codex secrets in GitHub environments must name
+    # them, or its jobs would run without their credentials.
+    environment_insert_at = with_start + 1
+    for name, expected in (environments or {}).items():
+        if name not in ENVIRONMENT_INPUTS:
+            raise CallerContractError(f"unsupported environment input: {name}")
+        if not expected:
+            continue
+        if not ENVIRONMENT_PATTERN.fullmatch(expected):
+            raise CallerContractError(f"invalid expected {name}: {expected}")
+        environment_line = _mapping_line(lines, with_start, with_end, with_indent, name)
+        if environment_line is None:
+            lines.insert(environment_insert_at, f"{' ' * (with_indent + 2)}{name}: {expected}\n")
+            environment_insert_at += 1
+            with_end += 1
+            continue
+        current = (
+            lines[environment_line].split(":", 1)[1].split(" #", 1)[0].strip().strip("'\"")
+        )
+        if current != expected:
+            raise CallerContractError(
+                f"caller {name} {current} does not match the expected {expected}"
+            )
+
     if requires_runner_group:
         if runner_group is None or not RUNNER_GROUP_PATTERN.fullmatch(runner_group):
             raise CallerContractError(
@@ -358,6 +385,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory holding the release's shared workflow files",
     )
     parser.add_argument("--runner-group")
+    parser.add_argument("--model-environment", default="")
+    parser.add_argument("--publisher-environment", default="")
     return parser
 
 
@@ -379,6 +408,10 @@ def main() -> int:
         requires_runner_group=release_requires_runner_group(release_workflow),
         runner_group=args.runner_group,
         remove_inputs=tuple(name for name in RETIRED_INPUTS if name not in still_required),
+        environments={
+            "model_environment": args.model_environment,
+            "publisher_environment": args.publisher_environment,
+        },
     )
     args.output.write_text(migrated, encoding="utf-8")
     return 0

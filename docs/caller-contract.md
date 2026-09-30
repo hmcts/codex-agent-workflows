@@ -35,6 +35,14 @@ Callers retain only repository-owned configuration and verification:
 
 Trusted planning, collection, repair, publication and security-validation scripts are loaded from this repository by `.github/actions/runtime` at an immutable commit SHA. Caller repositories must not copy or override that runtime.
 
+Callers move to a new release only through `Update caller workflow pins`. An operator dispatches it with the reviewed `release_sha` and a caller set: `juror`, `appreg` or `all`. `.github/config/caller-repositories.json` lists each caller with the following:
+
+- its caller set and default branch;
+- its runner group;
+- the model and publisher environments, where it keeps its secrets only in environments.
+
+The updater pins both wrappers and keeps that runner group and those environments. A repository whose wrappers do not call the shared workflows yet is skipped.
+
 The local pipeline must be credential-free and must not fetch or execute untrusted remote content. Existing branch-required Jenkins, Sonar, functional and smoke checks remain authoritative after publication.
 
 ## Publication behaviour

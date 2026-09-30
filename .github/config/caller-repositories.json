@@ -1,0 +1,77 @@
+{
+  "_comment": "Caller repositories the release updater pins, grouped into caller sets that are released separately. runner_group must be a group in runner-targets.json. Leave an environment empty when the caller does not keep its Codex secrets in a GitHub environment.",
+  "callers": [
+    {
+      "repository": "hmcts/juror-er-portal",
+      "set": "juror",
+      "branch": "master",
+      "runner_group": "juror-codex",
+      "model_environment": "",
+      "publisher_environment": ""
+    },
+    {
+      "repository": "hmcts/juror-public",
+      "set": "juror",
+      "branch": "master",
+      "runner_group": "juror-codex",
+      "model_environment": "",
+      "publisher_environment": ""
+    },
+    {
+      "repository": "hmcts/juror-bureau",
+      "set": "juror",
+      "branch": "master",
+      "runner_group": "juror-codex",
+      "model_environment": "",
+      "publisher_environment": ""
+    },
+    {
+      "repository": "hmcts/juror-api",
+      "set": "juror",
+      "branch": "master",
+      "runner_group": "juror-codex",
+      "model_environment": "",
+      "publisher_environment": ""
+    },
+    {
+      "repository": "hmcts/juror-scheduler-execution",
+      "set": "juror",
+      "branch": "master",
+      "runner_group": "juror-codex",
+      "model_environment": "",
+      "publisher_environment": ""
+    },
+    {
+      "repository": "hmcts/juror-pnc",
+      "set": "juror",
+      "branch": "master",
+      "runner_group": "juror-codex",
+      "model_environment": "",
+      "publisher_environment": ""
+    },
+    {
+      "repository": "hmcts/juror-scheduler-api",
+      "set": "juror",
+      "branch": "master",
+      "runner_group": "juror-codex",
+      "model_environment": "",
+      "publisher_environment": ""
+    },
+    {
+      "repository": "hmcts/appreg-api",
+      "set": "appreg",
+      "branch": "master",
+      "runner_group": "appreg-codex",
+      "model_environment": "codex-model",
+      "publisher_environment": "codex-publisher"
+    },
+    {
+      "repository": "hmcts/appreg-frontend",
+      "set": "appreg",
+      "branch": "master",
+      "runner_group": "appreg-codex",
+      "model_environment": "codex-model",
+      "publisher_environment": "codex-publisher"
+    }
+  ]
+}

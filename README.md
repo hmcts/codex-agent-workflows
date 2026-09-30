@@ -15,6 +15,8 @@ Each caller repository must provide the thin wrappers and verification adapter d
 
 The coordinated Juror configuration and activation sequence is documented in [`docs/juror-rollout.md`](docs/juror-rollout.md).
 
+Moving Apps Reg from its local workflows onto the shared ones, with the inputs that keep its behaviour, is documented in [`docs/appreg-rollout.md`](docs/appreg-rollout.md).
+
 The generated workflow inventory and Mermaid diagrams are available in [`docs/workflow-architecture.md`](docs/workflow-architecture.md). Regenerate that file with `.github/scripts/generate-workflow-docs.py` after changing a shared workflow.
 
 The principal runtime scripts, their trust boundaries and their hand-off contracts are documented in [`docs/script-reference.md`](docs/script-reference.md).

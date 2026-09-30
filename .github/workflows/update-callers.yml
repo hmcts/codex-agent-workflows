@@ -9,6 +9,14 @@ on:
         description: Shared workflow commit to publish
         required: true
         type: string
+      callers:
+        description: Caller set to update, from .github/config/caller-repositories.json
+        required: true
+        type: choice
+        options:
+          - juror
+          - appreg
+          - all
 
 permissions:
   contents: read
@@ -18,23 +26,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  select-callers:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - name: Checkout shared workflow repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Select the callers to update
+        id: select
+        env:
+          CALLERS: ${{ inputs.callers }}
+        run: python3 -I .github/scripts/select-caller-repositories.py --callers "${CALLERS}" >>"$GITHUB_OUTPUT"
+
   update-caller:
+    needs: select-callers
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        repository:
-          - hmcts/juror-er-portal
-          - hmcts/juror-public
-          - hmcts/juror-bureau
-          - hmcts/juror-api
-          - hmcts/juror-scheduler-execution
-          - hmcts/juror-pnc
-          - hmcts/juror-scheduler-api
+      matrix: ${{ fromJSON(needs.select-callers.outputs.matrix) }}
     env:
       TARGET_REPOSITORY: ${{ matrix.repository }}
+      TARGET_BRANCH: ${{ matrix.branch }}
       RELEASE_SHA: ${{ inputs.release_sha }}
-      RUNNER_GROUP: juror-codex
+      RUNNER_GROUP: ${{ matrix.runner_group }}
+      MODEL_ENVIRONMENT: ${{ matrix.model_environment }}
+      PUBLISHER_ENVIRONMENT: ${{ matrix.publisher_environment }}
 
     steps:
       - name: Checkout shared workflow repository
@@ -83,7 +103,6 @@ jobs:
       - name: Raise caller pin update
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          TARGET_BRANCH: master
         run: |
           set -euo pipefail
 
@@ -120,13 +139,19 @@ jobs:
             input_path="${update_dir}/${name}.input"
             output_path="${update_dir}/${name}.output"
             jq -r .content <<<"${metadata}" | base64 --decode >"${input_path}"
+            if ! grep -Eq '^[[:space:]]*uses:[[:space:]]*hmcts/codex-agent-workflows/\.github/workflows/' "${input_path}"; then
+              echo "${TARGET_REPOSITORY} ${path} does not call the shared workflows yet; skipping this release."
+              exit 0
+            fi
             python3 -I .github/scripts/update-caller-workflow.py \
               --workflow "${path}" \
               --release-sha "${RELEASE_SHA}" \
               --input "${input_path}" \
               --output "${output_path}" \
               --release-workflows "${release_dir}" \
-              --runner-group "${RUNNER_GROUP}"
+              --runner-group "${RUNNER_GROUP}" \
+              --model-environment "${MODEL_ENVIRONMENT}" \
+              --publisher-environment "${PUBLISHER_ENVIRONMENT}"
             printf '%s\n' "${blob_sha}" >"${update_dir}/${name}.sha"
             if ! cmp -s "${input_path}" "${output_path}"; then
               changed=true
@@ -201,4 +226,4 @@ jobs:
             --base "${TARGET_BRANCH}" \
             --head "${branch}" \
             --title "Update Codex shared workflows to ${RELEASE_SHA:0:12}" \
-            --body "Pins the Juror Codex caller workflows to the reviewed shared release at \`${RELEASE_SHA}\`, adding the \`${RUNNER_GROUP}\` runner group where the release requires it and removing any inputs the release has retired.${changes} The caller's workflows as changed here passed the shared credential safety gate before this PR was raised."
+            --body "Pins the Codex caller workflows to the reviewed shared release at \`${RELEASE_SHA}\`, adding the \`${RUNNER_GROUP}\` runner group where the release requires it and removing any inputs the release has retired.${changes} The caller's workflows as changed here passed the shared credential safety gate before this PR was raised."
