@@ -58,6 +58,7 @@ TRUSTED_REVIEW_INPUTS = %w[
   frontend_fast_command
   github_app_client_id
   required_status_context
+  review_selection
   required_status_poll_seconds
   required_status_timeout_seconds
   jira_notify_timeout_seconds

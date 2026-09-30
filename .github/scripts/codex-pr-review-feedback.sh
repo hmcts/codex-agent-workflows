@@ -34,6 +34,15 @@ sanitized_runner_temp="${artifact_dir}/sanitized-runner-temp"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 schema_source="${script_dir}/../schemas/codex-patch-result.schema.json"
 exporter_source="${script_dir}/codex-patch-export.sh"
+review_selection="${CODEX_REVIEW_SELECTION:-latest-review}"
+
+case "${review_selection}" in
+  latest-review | current-reviews) ;;
+  *)
+    echo "CODEX_REVIEW_SELECTION must be latest-review or current-reviews, not '${review_selection}'." >&2
+    exit 1
+    ;;
+esac
 
 # shellcheck source=.github/scripts/codex-action-runtime.sh
 source "${script_dir}/codex-action-runtime.sh"
@@ -140,6 +149,8 @@ feedback = {
     "REVIEW_STATE": "",
     "REVIEW_ID": "",
     "REVIEW_COMMENTS": "",
+    "REVIEW_HEAD_SHA": "",
+    "COMMENT_CREATED_AT": "",
 }
 
 if event_name == "issue_comment":
@@ -153,6 +164,7 @@ if event_name == "issue_comment":
             "COMMENT_AUTHOR_ASSOCIATION": comment.get("author_association") or "",
             "COMMENT_BODY": (comment.get("body") or "").strip(),
             "COMMENT_URL": comment.get("html_url") or "",
+            "COMMENT_CREATED_AT": comment.get("created_at") or "",
         }
     )
 else:
@@ -183,7 +195,11 @@ python3 -I "${script_dir}/codex-review-feedback-data.py" \
   --pr-number "${PR_NUMBER}" \
   --reviews-output "${reviews_json_path}" \
   --comments-output "${review_comments_json_path}" \
-  --env-output "${feedback_env_path}"
+  --env-output "${feedback_env_path}" \
+  --selection "${review_selection}" \
+  --command-author "${COMMENT_AUTHOR}" \
+  --command-url "${COMMENT_URL}" \
+  --command-created-at "${COMMENT_CREATED_AT}"
 
 set -a
 # shellcheck disable=SC1090
@@ -279,6 +295,10 @@ PY
 
 git_read_authenticated fetch origin "${HEAD_REF}:refs/remotes/origin/${HEAD_REF}"
 git_read_authenticated fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+if [[ -n "${REVIEW_HEAD_SHA}" && "$(git_sanitized rev-parse "refs/remotes/origin/${HEAD_REF}")" != "${REVIEW_HEAD_SHA}" ]]; then
+  echo "::error title=PR head moved::The PR head moved after the review feedback was collected. Post a fresh /codex-review command." >&2
+  exit 1
+fi
 git_sanitized checkout -B "${HEAD_REF}" "origin/${HEAD_REF}"
 HEAD_SHA="$(git_sanitized rev-parse "refs/remotes/origin/${HEAD_REF}")"
 BASE_SHA="$(git_sanitized rev-parse "refs/remotes/origin/${BASE_REF}")"

@@ -37,6 +37,19 @@ The trusted plan-validation job retains the complete normalised `plan.json`, its
 
 The same App may authenticate Azure Function workflow dispatches, provided it has `Actions: read and write` and is installed on every caller repository. Dispatch tokens are minted separately and restricted to the selected repository.
 
+## Review feedback selection
+
+`codex-review-feedback` takes an optional `review_selection` input that sets which review feedback a `/codex-review` command addresses. Only reviews and inline comments from users with write, maintain or admin permission are used in either mode.
+
+- `latest-review` (default): the newest actionable review, with its inline comments.
+- `current-reviews`: every change-request or comment review of the PR's current head, submitted by the time the command was posted. A reviewer's feedback is left out if that reviewer has approved since.
+  - Inline comments are included only if they still apply to the current head and were not written or edited after the command.
+  - The command's author must also have write access.
+  - The collected feedback is capped at 64 KiB.
+  - If the PR head moves after the feedback is collected, the run stops and asks for a fresh `/codex-review`.
+
+Any other value fails the run before anything else starts.
+
 ## Required repository files
 
 Callers retain only repository-owned configuration and verification:
