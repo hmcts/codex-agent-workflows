@@ -83,6 +83,18 @@ Both reusable workflows take three optional inputs for frontend repositories. Th
 - `node_version_file`: a repository file that pins the Node.js version for verification, such as `.nvmrc`. When set, it replaces `node_version`.
 - `frontend_fast_command`: passed to the local pipeline as `FRONTEND_FAST_COMMAND` in every credential-free verification, such as `yarn lint`. When empty, the pipeline keeps its own default.
 
+## Review repairs before publication
+
+`codex-review-feedback` takes an optional `review_repair_rounds` input, `"0"` (default) to `"3"`. When credential-free verification of a review-feedback patch fails, each round:
+
+1. gives Codex the latest patch and its verification failure;
+2. collects the repaired patch in a trusted job;
+3. verifies it again, without credentials, against the same PR head.
+
+The first round that passes is published. When every round fails, or a round produces no repair, the last verification failure is reported as before.
+
+Each round runs the model in `codex-review-repair-round.yml`, so a runner group that restricts its workflows must allow that file as well. Any value other than `0` to `3` fails the run before anything else starts.
+
 ## Publication behaviour
 
 Passing verification produces a ready-for-review PR. When all available repair attempts fail, the latest structurally valid patch is published as a draft with the verification failure attached. Sensitive changes are allowed but must be highlighted in the PR body.

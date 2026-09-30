@@ -63,6 +63,8 @@ flowchart LR
     Feedback --> Model[Review repair model]
     Model --> Artifact[(Structured patch artifact)]
     Artifact --> Verify[Credential-free verification]
+    Verify -->|failed, when review_repair_rounds is set| Repair[Review repair round]
+    Repair --> Verify
     Verify --> Publish[GitHub App update]
     Publish --> Status[Required checks and Jira callback]
 ```
@@ -78,10 +80,11 @@ flowchart LR
 | `codex-post-verify.yml` | Codex published PR verification | Internal reusable stage | 2 | - |
 | `codex-publish.yml` | Codex PR publication | Internal reusable stage | 5 | - |
 | `codex-repair-round.yml` | Codex repair and verification round | Internal reusable stage | 3 | - |
-| `codex-review-feedback.yml` | Codex PR Review Feedback | Public entry point | 6 | `codex-review-generate.yml`, `codex-review-intake.yml`, `codex-review-publish.yml`, `codex-review-repair.yml`, `codex-review-terminal.yml` |
+| `codex-review-feedback.yml` | Codex PR Review Feedback | Public entry point | 9 | `codex-review-generate.yml`, `codex-review-intake.yml`, `codex-review-publish.yml`, `codex-review-repair-round.yml`, `codex-review-repair.yml`, `codex-review-terminal.yml` |
 | `codex-review-generate.yml` | Codex review generation and verification | Internal reusable stage | 4 | - |
 | `codex-review-intake.yml` | Codex review intake | Internal reusable stage | 1 | - |
 | `codex-review-publish.yml` | Codex review publication | Internal reusable stage | 2 | - |
+| `codex-review-repair-round.yml` | Codex review repair and verification round | Internal reusable stage | 3 | - |
 | `codex-review-repair.yml` | Codex review external repair | Internal reusable stage | 7 | - |
 | `codex-review-terminal.yml` | Codex review terminal failure | Internal reusable stage | 1 | - |
 | `codex-verification.yml` | Codex verification and repair | Internal reusable stage | 4 | `codex-repair-round.yml`, `codex-verify-initial.yml` |

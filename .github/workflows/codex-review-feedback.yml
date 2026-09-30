@@ -71,6 +71,11 @@ on:
         required: false
         default: "2700"
         type: string
+      review_repair_rounds:
+        description: "Repair attempts, 0 to 3, when credential-free verification of the review patch fails before publication"
+        required: false
+        default: "0"
+        type: string
       jira_notify_timeout_seconds:
         description: Jira callback timeout
         required: false
@@ -128,6 +133,14 @@ jobs:
             none|prettier) ;;
             *) echo "::error title=Unknown formatter::formatter must be none or prettier, not '${FORMATTER}'."; exit 1 ;;
           esac
+      - name: Refuse an unknown number of review repairs
+        env:
+          REVIEW_REPAIR_ROUNDS: ${{ inputs.review_repair_rounds }}
+        run: |
+          case "${REVIEW_REPAIR_ROUNDS}" in
+            0|1|2|3) ;;
+            *) echo "::error title=Unknown review repair count::review_repair_rounds must be 0, 1, 2 or 3, not '${REVIEW_REPAIR_ROUNDS}'."; exit 1 ;;
+          esac
       - name: Refuse an unexpected runner group or label
         env:
           RUNNER_GROUP: ${{ inputs.runner_group }}
@@ -180,9 +193,105 @@ jobs:
     secrets:
       CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
 
+  verification-repair-1:
+    needs: generate-and-verify
+    if: fromJSON(inputs.review_repair_rounds) >= 1 && needs.generate-and-verify.outputs.passed == 'false'
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    uses: ./.github/workflows/codex-review-repair-round.yml
+    with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
+      runner_group: ${{ inputs.runner_group }}
+      runner_label: ${{ inputs.runner_label }}
+      node_version: ${{ inputs.node_version }}
+      formatter: ${{ inputs.formatter }}
+      node_version_file: ${{ inputs.node_version_file }}
+      frontend_fast_command: ${{ inputs.frontend_fast_command }}
+      java_version: ${{ inputs.java_version }}
+      attempt: "1"
+      max_attempts: ${{ inputs.review_repair_rounds }}
+      pr_number: ${{ needs.generate-and-verify.outputs.pr_number }}
+      head_ref: ${{ needs.generate-and-verify.outputs.head_ref }}
+      base_ref: ${{ needs.generate-and-verify.outputs.base_ref }}
+      head_sha: ${{ needs.generate-and-verify.outputs.head_sha }}
+      base_sha: ${{ needs.generate-and-verify.outputs.base_sha }}
+      trusted_sha: ${{ needs.generate-and-verify.outputs.trusted_sha }}
+      source_artifact: codex-review-verification-source
+      input_artifact: codex-review-output
+      failure_artifact: ${{ needs.generate-and-verify.outputs.failure_artifact }}
+    secrets:
+      CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
+
+  verification-repair-2:
+    needs: [generate-and-verify, verification-repair-1]
+    if: fromJSON(inputs.review_repair_rounds) >= 2 && needs.verification-repair-1.outputs.passed == 'false' && needs.verification-repair-1.outputs.failure_artifact != ''
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    uses: ./.github/workflows/codex-review-repair-round.yml
+    with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
+      runner_group: ${{ inputs.runner_group }}
+      runner_label: ${{ inputs.runner_label }}
+      node_version: ${{ inputs.node_version }}
+      formatter: ${{ inputs.formatter }}
+      node_version_file: ${{ inputs.node_version_file }}
+      frontend_fast_command: ${{ inputs.frontend_fast_command }}
+      java_version: ${{ inputs.java_version }}
+      attempt: "2"
+      max_attempts: ${{ inputs.review_repair_rounds }}
+      pr_number: ${{ needs.generate-and-verify.outputs.pr_number }}
+      head_ref: ${{ needs.generate-and-verify.outputs.head_ref }}
+      base_ref: ${{ needs.generate-and-verify.outputs.base_ref }}
+      head_sha: ${{ needs.generate-and-verify.outputs.head_sha }}
+      base_sha: ${{ needs.generate-and-verify.outputs.base_sha }}
+      trusted_sha: ${{ needs.generate-and-verify.outputs.trusted_sha }}
+      source_artifact: codex-review-verification-source
+      input_artifact: ${{ needs.verification-repair-1.outputs.output_artifact }}
+      failure_artifact: ${{ needs.verification-repair-1.outputs.failure_artifact }}
+    secrets:
+      CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
+
+  verification-repair-3:
+    needs: [generate-and-verify, verification-repair-2]
+    if: fromJSON(inputs.review_repair_rounds) >= 3 && needs.verification-repair-2.outputs.passed == 'false' && needs.verification-repair-2.outputs.failure_artifact != ''
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    uses: ./.github/workflows/codex-review-repair-round.yml
+    with:
+      model_environment: ${{ inputs.model_environment }}
+      publisher_environment: ${{ inputs.publisher_environment }}
+      runner_group: ${{ inputs.runner_group }}
+      runner_label: ${{ inputs.runner_label }}
+      node_version: ${{ inputs.node_version }}
+      formatter: ${{ inputs.formatter }}
+      node_version_file: ${{ inputs.node_version_file }}
+      frontend_fast_command: ${{ inputs.frontend_fast_command }}
+      java_version: ${{ inputs.java_version }}
+      attempt: "3"
+      max_attempts: ${{ inputs.review_repair_rounds }}
+      pr_number: ${{ needs.generate-and-verify.outputs.pr_number }}
+      head_ref: ${{ needs.generate-and-verify.outputs.head_ref }}
+      base_ref: ${{ needs.generate-and-verify.outputs.base_ref }}
+      head_sha: ${{ needs.generate-and-verify.outputs.head_sha }}
+      base_sha: ${{ needs.generate-and-verify.outputs.base_sha }}
+      trusted_sha: ${{ needs.generate-and-verify.outputs.trusted_sha }}
+      source_artifact: codex-review-verification-source
+      input_artifact: ${{ needs.verification-repair-2.outputs.output_artifact }}
+      failure_artifact: ${{ needs.verification-repair-2.outputs.failure_artifact }}
+    secrets:
+      CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
+
   publish:
-    needs: [intake, generate-and-verify]
-    if: always() && needs.intake.outputs.is_codex_pr == 'true' && needs.generate-and-verify.outputs.passed == 'true'
+    needs: [intake, generate-and-verify, verification-repair-1, verification-repair-2, verification-repair-3]
+    if: always() && needs.intake.outputs.is_codex_pr == 'true' && (needs.generate-and-verify.outputs.passed == 'true' || needs.verification-repair-1.outputs.passed == 'true' || needs.verification-repair-2.outputs.passed == 'true' || needs.verification-repair-3.outputs.passed == 'true')
     permissions:
       contents: read
     uses: ./.github/workflows/codex-review-publish.yml
@@ -200,7 +309,9 @@ jobs:
       head_sha: ${{ needs.generate-and-verify.outputs.head_sha }}
       base_sha: ${{ needs.generate-and-verify.outputs.base_sha }}
       trusted_sha: ${{ needs.generate-and-verify.outputs.trusted_sha }}
-      verification_passed: ${{ needs.generate-and-verify.outputs.passed }}
+      verification_passed: ${{ (needs.generate-and-verify.outputs.passed == 'true' || needs.verification-repair-1.outputs.passed == 'true' || needs.verification-repair-2.outputs.passed == 'true' || needs.verification-repair-3.outputs.passed == 'true') && 'true' || needs.generate-and-verify.outputs.passed }}
+      output_artifact: ${{ needs.verification-repair-3.outputs.passed == 'true' && needs.verification-repair-3.outputs.output_artifact || needs.verification-repair-2.outputs.passed == 'true' && needs.verification-repair-2.outputs.output_artifact || needs.verification-repair-1.outputs.passed == 'true' && needs.verification-repair-1.outputs.output_artifact || 'codex-review-output' }}
+      verified_artifact: ${{ needs.verification-repair-3.outputs.passed == 'true' && needs.verification-repair-3.outputs.verified_artifact || needs.verification-repair-2.outputs.passed == 'true' && needs.verification-repair-2.outputs.verified_artifact || needs.verification-repair-1.outputs.passed == 'true' && needs.verification-repair-1.outputs.verified_artifact || 'codex-review-verified' }}
     secrets:
       CODEX_GITHUB_APP_PRIVATE_KEY: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
 
@@ -246,7 +357,7 @@ jobs:
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
 
   terminal-failure:
-    needs: [intake, generate-and-verify, publish]
+    needs: [intake, generate-and-verify, verification-repair-1, verification-repair-2, verification-repair-3, publish]
     if: always() && needs.intake.outputs.is_codex_pr == 'true'
     permissions:
       contents: read
@@ -261,8 +372,8 @@ jobs:
       should_run: ${{ needs.generate-and-verify.outputs.should_run }}
       pr_number: ${{ needs.generate-and-verify.outputs.pr_number || needs.intake.outputs.pr_number }}
       head_sha: ${{ needs.generate-and-verify.outputs.head_sha }}
-      verification_passed: ${{ needs.generate-and-verify.outputs.passed }}
-      failure_artifact: ${{ needs.generate-and-verify.outputs.failure_artifact }}
+      verification_passed: ${{ (needs.generate-and-verify.outputs.passed == 'true' || needs.verification-repair-1.outputs.passed == 'true' || needs.verification-repair-2.outputs.passed == 'true' || needs.verification-repair-3.outputs.passed == 'true') && 'true' || needs.generate-and-verify.outputs.passed }}
+      failure_artifact: ${{ needs.verification-repair-3.outputs.failure_artifact || needs.verification-repair-2.outputs.failure_artifact || needs.verification-repair-1.outputs.failure_artifact || needs.generate-and-verify.outputs.failure_artifact }}
       published_commit_sha: ${{ needs.publish.outputs.commit_sha }}
     secrets:
       CODEX_GITHUB_APP_PRIVATE_KEY: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
