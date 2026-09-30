@@ -34,6 +34,25 @@ EXPECTED_KEYS = {
 }
 RISK_LEVELS = {"low", "medium", "high"}
 FORBIDDEN_PATH_ROOTS = {".git"}
+PLAN_POLICIES = ("standard", "strict")
+# A strict plan may not touch automation metadata or the tooling that runs
+# verification, and leaves high-risk or cross-system work to people.
+STRICT_FORBIDDEN_PATH_ROOTS = {".github"}
+STRICT_TOOLING_PATH_ROOTS = {".yarn", "bin", "buildSrc", "gradle"}
+STRICT_TOOLING_PATHS = {
+    ".nvmrc",
+    ".pnp.cjs",
+    ".pnp.loader.mjs",
+    ".yarnrc.yml",
+    "build.gradle",
+    "gradle.properties",
+    "gradlew",
+    "gradlew.bat",
+    "init.gradle",
+    "package.json",
+    "settings.gradle",
+    "yarn.lock",
+}
 SENSITIVE_PATH_ROOTS = {
     ".github",
     "bin",
@@ -146,7 +165,32 @@ def validate_steps(value: Any) -> list[dict[str, str]]:
     return steps
 
 
-def validate_plan(raw: str) -> dict[str, Any]:
+def apply_strict_policy(plan: dict[str, Any]) -> None:
+    paths = [
+        (step["path"], f"implementation_steps[{index}].path")
+        for index, step in enumerate(plan["implementation_steps"])
+    ] + [(path, f"sensitive_files[{index}]") for index, path in enumerate(plan["sensitive_files"])]
+    for path_text, field in paths:
+        root = PurePosixPath(path_text).parts[0]
+        if root in STRICT_FORBIDDEN_PATH_ROOTS:
+            raise PlanValidationError(f"{field} targets protected automation metadata")
+        if root in STRICT_TOOLING_PATH_ROOTS or path_text in STRICT_TOOLING_PATHS:
+            raise PlanValidationError(f"{field} targets verification-sensitive tooling")
+
+    if plan["ready_to_implement"]:
+        blockers = []
+        if plan["risk_level"] == "high":
+            blockers.append("High-risk changes are outside the auto-approved small-bug workflow.")
+        if plan["cross_system_change"]:
+            blockers.append(
+                "Cross-system changes are outside the auto-approved single-repository workflow."
+            )
+        if blockers:
+            plan["ready_to_implement"] = False
+            plan["blockers"] = blockers
+
+
+def validate_plan(raw: str, policy: str = "standard") -> dict[str, Any]:
     if len(raw.encode("utf-8")) > MAX_PLAN_BYTES:
         raise PlanValidationError(f"plan exceeds the {MAX_PLAN_BYTES}-byte limit")
     try:
@@ -219,6 +263,8 @@ def validate_plan(raw: str) -> dict[str, Any]:
     elif not plan["blockers"]:
         raise PlanValidationError("a plan that is not ready must explain its blockers")
 
+    if policy == "strict":
+        apply_strict_policy(plan)
     return plan
 
 
@@ -254,9 +300,13 @@ def validate_action_result() -> int:
     if not raw or not output_dir_value:
         print("CODEX_PLAN_RESULT and OUTPUT_DIR are required", file=sys.stderr)
         return 2
+    policy = os.environ.get("CODEX_PLAN_POLICY") or "standard"
+    if policy not in PLAN_POLICIES:
+        print(f"CODEX_PLAN_POLICY must be standard or strict, not {policy!r}", file=sys.stderr)
+        return 2
 
     try:
-        plan = validate_plan(raw)
+        plan = validate_plan(raw, policy)
         plan_bytes = canonical_plan_bytes(plan)
     except PlanValidationError as exc:
         print(f"Invalid Codex plan: {exc}", file=sys.stderr)
