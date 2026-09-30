@@ -30,6 +30,16 @@ class NotifyJiraAutomationTest(unittest.TestCase):
             clear=True,
         )
 
+    def test_empty_callback_url_fails_instead_of_skipping(self):
+        argv = ["notify-jira-automation.py", "--pr-url", "https://github.com/hmcts/juror-api/pull/1"]
+        with self.environment(), patch.object(MODULE.sys, "argv", argv), patch(
+            "builtins.print"
+        ) as printed, patch.object(MODULE, "_post_json") as post:
+            status = MODULE.main()
+        self.assertEqual(status, 1)
+        post.assert_not_called()
+        self.assertIn("CODEX_JIRA_PR_NOTIFY_URL is empty", printed.call_args.args[0])
+
     def test_builds_pr_payload(self):
         args = argparse.Namespace(
             pr_url="https://github.com/hmcts/juror-api/pull/1",

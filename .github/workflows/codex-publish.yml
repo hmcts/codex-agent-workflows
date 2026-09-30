@@ -80,9 +80,9 @@ on:
         value: ${{ jobs.publish-pr.outputs.pr_number && 'true' || 'false' }}
     secrets:
       CODEX_GITHUB_APP_PRIVATE_KEY:
-        required: true
+        required: false
       CODEX_JIRA_PR_NOTIFY_URL:
-        required: true
+        required: false
 
 jobs:
   prepare-draft-publication:

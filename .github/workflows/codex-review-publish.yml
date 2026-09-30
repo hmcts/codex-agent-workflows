@@ -64,7 +64,7 @@ on:
         value: ${{ jobs.verify-review-status.outputs.failure_class }}
     secrets:
       CODEX_GITHUB_APP_PRIVATE_KEY:
-        required: true
+        required: false
 
 permissions:
   contents: read

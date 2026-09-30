@@ -85,7 +85,7 @@ on:
         value: ${{ jobs.repair-3.outputs.has_changes == 'true' && jobs.repair-3.outputs.failure_class || jobs.repair-2.outputs.has_changes == 'true' && jobs.repair-2.outputs.failure_class || jobs.repair-1.outputs.has_changes == 'true' && jobs.repair-1.outputs.failure_class || jobs.initial.outputs.failure_class }}
     secrets:
       CODEX_OPENAI_API_KEY:
-        required: true
+        required: false
 
 jobs:
   initial:
