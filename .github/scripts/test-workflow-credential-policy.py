@@ -343,5 +343,163 @@ jobs:
 
 
 
+    SKIP = "${{ !startsWith(github.head_ref, 'codex/') }}"
+
+    @staticmethod
+    def credentialed_job(condition: str | None, *, name: str = "add-redirect-uris") -> str:
+        guard = f"    if: {condition}\n" if condition is not None else ""
+        return (
+            f"  {name}:\n"
+            f"{guard}"
+            "    runs-on: ubuntu-latest\n"
+            "    env:\n"
+            "      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}\n"
+            "    steps:\n"
+            "      - run: echo register\n"
+        )
+
+    def test_generated_pr_skip_exempts_a_credentialed_pull_request_job(self):
+        for trigger in (
+            "on: pull_request",
+            "on:\n  pull_request:\n    types: [opened, reopened, synchronize]",
+            "on:\n  pull_request:\n    types: [closed]",
+            "on: pull_request_target",
+            "on:\n  pull_request:\n  pull_request_target:",
+        ):
+            for condition in (self.SKIP, "!startsWith(github.head_ref, 'codex/')"):
+                with self.subTest(trigger=trigger, condition=condition):
+                    body = "permissions:\n  contents: read\njobs:\n" + self.credentialed_job(
+                        f'"{condition}"' if condition.startswith("!") else condition
+                    )
+                    completed = self.run_check({"preview.yml": workflow(body, trigger=trigger)})
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_generated_pr_skip_exempts_a_code_scanning_upload(self):
+        body = f"""permissions:
+  contents: read
+jobs:
+  analyze:
+    if: {self.SKIP}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: github/codeql-action/analyze@v3"""
+        trigger = (
+            "on:\n  push:\n    branches: [master]\n"
+            "  pull_request:\n    branches: [master]\n"
+            "  schedule:\n    - cron: '0 3 * * 1'"
+        )
+        completed = self.run_check({"codeql.yaml": workflow(body, trigger=trigger)})
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        self.assert_blocked(
+            workflow(body.replace(f"    if: {self.SKIP}\n", ""), trigger=trigger),
+            "effective write permission(s): security-events",
+            filename="codeql.yaml",
+        )
+
+    def test_only_the_exact_skip_condition_exempts_a_job(self):
+        for condition in (
+            None,
+            "${{ !startsWith(github.head_ref, 'codex') }}",
+            "${{ !startsWith(github.head_ref, 'CODEX/') }}",
+            "${{ !startsWith(github.ref, 'refs/heads/codex/') }}",
+            "${{ startsWith(github.head_ref, 'codex/') }}",
+            "${{ github.head_ref != 'codex/' }}",
+            "${{ !startsWith(github.head_ref, 'codex/') || true }}",
+            "${{ !startsWith(github.head_ref, 'codex/') && github.actor != 'bot' || true }}",
+            "${{ always() }}",
+        ):
+            with self.subTest(condition=condition):
+                body = "permissions:\n  contents: read\njobs:\n" + self.credentialed_job(condition)
+                self.assert_blocked(workflow(body), "references the secrets context")
+
+    def test_skip_condition_gives_no_cover_when_another_event_reaches_the_workflow(self):
+        body = "permissions:\n  contents: read\njobs:\n" + self.credentialed_job(self.SKIP)
+        for trigger in (
+            "on:\n  pull_request:\n  push:",
+            "on:\n  pull_request:\n  push:\n    branches: ['**']",
+            "on:\n  pull_request:\n  issue_comment:\n    types: [created]",
+            "on:\n  pull_request:\n  create:",
+            "on:\n  pull_request:\n  check_run:\n    types: [completed]",
+        ):
+            with self.subTest(trigger=trigger):
+                self.assert_blocked(workflow(body, trigger=trigger), "references the secrets context")
+
+    def test_skip_condition_gives_no_cover_to_a_workflow_run_listener(self):
+        body = "permissions:\n  contents: read\njobs:\n" + self.credentialed_job(self.SKIP)
+        self.assert_workflows_blocked(
+            {
+                "ci.yml": named_workflow(
+                    "CI",
+                    "permissions:\n  contents: read\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: []",
+                    trigger="on: pull_request",
+                ),
+                "listener.yml": named_workflow(
+                    "Listener",
+                    body,
+                    trigger="on:\n  workflow_run:\n    workflows: [CI]\n    types: [completed]",
+                ),
+            },
+            "references the secrets context",
+            filename="listener.yml",
+        )
+
+    def test_skip_exempts_only_the_job_that_declares_it(self):
+        body = (
+            "permissions:\n  contents: read\njobs:\n"
+            + self.credentialed_job(self.SKIP)
+            + self.credentialed_job(None, name="build")
+        )
+        completed = self.run_check({"ci.yml": workflow(body)})
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("workflow.jobs.build.env.AZURE_CLIENT_ID references the secrets context", completed.stderr)
+        self.assertNotIn("add-redirect-uris", completed.stderr)
+
+    def test_a_dependent_job_needs_its_own_skip_condition(self):
+        body = (
+            "permissions:\n  contents: read\njobs:\n"
+            "  plan:\n"
+            f"    if: {self.SKIP}\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps: []\n"
+            + self.credentialed_job(None, name="deploy").replace(
+                "    runs-on: ubuntu-latest\n", "    needs: plan\n    runs-on: ubuntu-latest\n", 1
+            )
+        )
+        self.assert_blocked(workflow(body), "workflow.jobs.deploy.env.AZURE_CLIENT_ID references the secrets context")
+
+    def test_workflow_level_secrets_stay_blocked_when_every_job_skips(self):
+        body = (
+            "permissions:\n  contents: read\n"
+            "env:\n  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}\n"
+            "jobs:\n"
+            f"  register:\n    if: {self.SKIP}\n    runs-on: ubuntu-latest\n    steps: []\n"
+        )
+        self.assert_blocked(workflow(body), "workflow.env.AZURE_CLIENT_ID references the secrets context")
+
+    def test_skipped_job_does_not_reach_its_local_reusable_workflow(self):
+        callee = reusable(
+            "permissions:\n  contents: read\njobs:\n" + self.credentialed_job(None, name="register")
+        )
+        for condition, blocked in ((self.SKIP, False), (None, True)):
+            with self.subTest(skipped=not blocked):
+                guard = f"    if: {condition}\n" if condition else ""
+                caller = workflow(
+                    "permissions:\n  contents: read\njobs:\n"
+                    f"  register:\n{guard}    uses: ./.github/workflows/register.yml\n"
+                )
+                workflows = {"preview.yml": caller, "register.yml": callee}
+                if blocked:
+                    self.assert_workflows_blocked(
+                        workflows, "references the secrets context", filename="preview.yml"
+                    )
+                else:
+                    completed = self.run_check(workflows)
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

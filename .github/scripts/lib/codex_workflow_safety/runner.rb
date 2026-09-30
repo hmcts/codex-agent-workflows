@@ -70,7 +70,11 @@ candidate_analyses.each_value do |analysis|
       end
       enforce_trusted_review_dispatch!(analysis, approved)
     else
-      enforce_policy!(analysis.entry, entries)
+      enforce_policy!(
+        analysis.entry,
+        entries,
+        skip_generated_prs: generated_pr_skip_applies?(analysis.entry.workflow)
+      )
     end
   rescue WorkflowSafetyError => error
     errors << "#{analysis.entry.relative_path}: #{error.message}"
@@ -86,7 +90,11 @@ trusted_analyses.each_value do |analysis|
     if trusted_review_candidate?(analysis.entry.workflow)
       enforce_trusted_review_dispatch!(analysis)
     else
-      enforce_policy!(analysis.entry, trusted_entries)
+      enforce_policy!(
+        analysis.entry,
+        trusted_entries,
+        skip_generated_prs: generated_pr_skip_applies?(analysis.entry.workflow)
+      )
     end
   rescue WorkflowSafetyError => error
     errors << "trusted:#{analysis.entry.relative_path}: #{error.message}"
