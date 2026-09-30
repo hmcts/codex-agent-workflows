@@ -20,6 +20,18 @@ on:
       runner_label:
         required: true
         type: string
+      formatter:
+        required: false
+        default: none
+        type: string
+      node_version_file:
+        required: false
+        default: ''
+        type: string
+      frontend_fast_command:
+        required: false
+        default: ''
+        type: string
       node_version:
         required: false
         default: "22"
@@ -254,6 +266,7 @@ jobs:
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb "$RUNNER_TEMP/trusted-safety/trusted-check-codex-pr-safety.rb"
           cp -R ${CODEX_RUNTIME_PATH}/.github/scripts/lib/codex_workflow_safety/. "$RUNNER_TEMP/trusted-safety/lib/codex_workflow_safety/"
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh "$RUNNER_TEMP/trusted-codex-prepare-policy-candidate.sh"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-format-changed-files.sh "$RUNNER_TEMP/trusted-codex-format-changed-files.sh"
           cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
 
       - name: Upload credential-free review source
@@ -265,6 +278,7 @@ jobs:
             ${{ runner.temp }}/trusted-codex-pr-review-verify.sh
             ${{ runner.temp }}/trusted-safety
             ${{ runner.temp }}/trusted-codex-prepare-policy-candidate.sh
+            ${{ runner.temp }}/trusted-codex-format-changed-files.sh
             ${{ runner.temp }}/trusted-codex-local-pipeline.sh
           if-no-files-found: error
           retention-days: 1
@@ -308,7 +322,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: ${{ inputs.node_version }}
+          node-version: ${{ inputs.node_version_file == '' && inputs.node_version || '' }}
+          node-version-file: ${{ inputs.node_version_file }}
 
       - name: Enable Corepack
         run: corepack enable
@@ -326,6 +341,9 @@ jobs:
           TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
           TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-safety/trusted-check-codex-pr-safety.rb
           TRUSTED_POLICY_PREPARER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-prepare-policy-candidate.sh
+          TRUSTED_FORMATTER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-format-changed-files.sh
+          CODEX_FORMATTER: ${{ inputs.formatter }}
+          CODEX_FRONTEND_FAST_COMMAND: ${{ inputs.frontend_fast_command }}
         run: |
           set +e
           bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh" >"$RUNNER_TEMP/codex-review-verification.log" 2>&1
@@ -347,6 +365,7 @@ jobs:
         with:
           name: codex-review-verified
           path: |
+            ${{ runner.temp }}/codex-output/changes.patch
             ${{ runner.temp }}/codex-output/codex-review-comment.md
             ${{ runner.temp }}/codex-output/guardrail-changes.txt
             ${{ runner.temp }}/codex-output/verification.env

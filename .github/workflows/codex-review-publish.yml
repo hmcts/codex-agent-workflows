@@ -26,6 +26,10 @@ on:
       required_status_timeout_seconds:
         required: true
         type: string
+      formatter:
+        required: false
+        default: none
+        type: string
       is_codex_pr:
         required: true
         type: string
@@ -131,6 +135,20 @@ jobs:
         with:
           name: codex-review-output
           path: ${{ runner.temp }}/codex-output
+
+      - name: Download formatted Codex review patch
+        if: inputs.formatter == 'prettier'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: codex-review-verified
+          path: ${{ runner.temp }}/codex-formatted
+
+      - name: Adopt formatted Codex review patch
+        if: inputs.formatter == 'prettier'
+        run: |
+          python3 -I "${CODEX_RUNTIME_PATH}/.github/scripts/codex-adopt-formatted-patch.py" \
+            --output-dir "$RUNNER_TEMP/codex-output" \
+            --verified-dir "$RUNNER_TEMP/codex-formatted"
 
       - name: Materialize candidate policy tree
         env:

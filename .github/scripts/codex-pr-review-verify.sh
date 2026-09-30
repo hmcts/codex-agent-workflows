@@ -35,8 +35,12 @@ trusted_policy_preparer_path="${artifact_dir}/trusted-codex-prepare-policy-candi
 trusted_repository_root="${artifact_dir}/trusted-repository"
 safety_gate_path="${TRUSTED_PR_SAFETY_PATH}"
 policy_preparer_source_path="${TRUSTED_POLICY_PREPARER_PATH}"
+formatter="${CODEX_FORMATTER:-none}"
+formatter_source_path="${TRUSTED_FORMATTER_PATH:-}"
+trusted_formatter_path="${artifact_dir}/trusted-codex-format-changed-files.sh"
 trusted_pipeline_sha=""
 trusted_policy_preparer_sha=""
+trusted_formatter_sha=""
 guardrail_review_required="false"
 guardrail_pathspecs=(
   "bin/codex-local-pipeline.sh"
@@ -85,6 +89,9 @@ run_sanitized() {
 
   if [[ -n "${JAVA_HOME:-}" ]]; then
     sanitized_env+=("JAVA_HOME=${JAVA_HOME}")
+  fi
+  if [[ -n "${CODEX_FRONTEND_FAST_COMMAND:-}" ]]; then
+    sanitized_env+=("FRONTEND_FAST_COMMAND=${CODEX_FRONTEND_FAST_COMMAND}")
   fi
 
   "${sanitized_env[@]}" "$@"
@@ -201,6 +208,15 @@ cp "${policy_preparer_source_path}" "${trusted_policy_preparer_path}"
 chmod +x "${trusted_policy_preparer_path}"
 trusted_policy_preparer_sha="$(file_sha256 "${trusted_policy_preparer_path}")"
 
+if [[ "${formatter}" != "none" ]]; then
+  if [[ -z "${formatter_source_path}" || ! -f "${formatter_source_path}" || -L "${formatter_source_path}" ]]; then
+    echo "Missing trusted formatter: ${formatter_source_path}" >&2
+    exit 1
+  fi
+  cp "${formatter_source_path}" "${trusted_formatter_path}"
+  trusted_formatter_sha="$(file_sha256 "${trusted_formatter_path}")"
+fi
+
 actual_head_sha="$(git_sanitized rev-parse HEAD)"
 actual_base_sha="$(git_sanitized rev-parse "refs/remotes/origin/${base_ref}")"
 if [[ "${actual_head_sha}" != "${EXPECTED_HEAD_SHA}" || "${actual_base_sha}" != "${EXPECTED_BASE_SHA}" ]]; then
@@ -227,6 +243,12 @@ fi
 run_sanitized ruby --disable-gems "${safety_gate_path}" \
   --repository-root . \
   --trusted-repository-root "${trusted_repository_root}"
+
+if [[ "${formatter}" != "none" ]]; then
+  verify_trusted_file "${trusted_formatter_path}" "${trusted_formatter_sha}" "formatter"
+  run_sanitized env CODEX_FORMATTER="${formatter}" bash "${trusted_formatter_path}" "${patch_path}"
+  patch_sha="$(file_sha256 "${patch_path}")"
+fi
 
 detect_guardrail_changes
 append_guardrail_warning

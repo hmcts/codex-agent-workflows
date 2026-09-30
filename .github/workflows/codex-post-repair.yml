@@ -42,6 +42,18 @@ on:
       runner_label:
         required: true
         type: string
+      formatter:
+        required: false
+        default: none
+        type: string
+      node_version_file:
+        required: false
+        default: ''
+        type: string
+      frontend_fast_command:
+        required: false
+        default: ''
+        type: string
       node_version:
         required: false
         default: "22"
@@ -322,7 +334,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: ${{ inputs.node_version }}
+          node-version: ${{ inputs.node_version_file == '' && inputs.node_version || '' }}
+          node-version-file: ${{ inputs.node_version_file }}
 
       - name: Enable Corepack
         run: corepack enable
@@ -337,6 +350,8 @@ jobs:
         id: verify
         env:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          CODEX_FORMATTER: ${{ inputs.formatter }}
+          CODEX_FRONTEND_FAST_COMMAND: ${{ inputs.frontend_fast_command }}
         run: |
           set +e
           ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-verify.sh >"$RUNNER_TEMP/codex-pr-repair-verification.log" 2>&1
@@ -358,6 +373,7 @@ jobs:
         with:
           name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
           path: |
+            ${{ runner.temp }}/codex-output/changes.patch
             ${{ runner.temp }}/codex-output/codex-pr-body.md
             ${{ runner.temp }}/codex-output/guardrail-changes.txt
             ${{ runner.temp }}/codex-output/verification.env
@@ -399,6 +415,7 @@ jobs:
       EXPECTED_BRANCH_HEAD_SHA: ${{ inputs.commit_sha }}
       POLICY_CANDIDATE_BASE_SHA: ${{ inputs.source_sha }}
       CODEX_OUTPUT_ARTIFACT: ${{ needs.verify-published-pr-repair-1.outputs.output_artifact }}
+      CODEX_PUBLISHED_OUTPUT_ARTIFACT: ${{ inputs.formatter == 'prettier' && format('{0}-formatted', needs.verify-published-pr-repair-1.outputs.output_artifact) || needs.verify-published-pr-repair-1.outputs.output_artifact }}
       CODEX_VERIFIED_ARTIFACT: ${{ needs.verify-published-pr-repair-1.outputs.verified_artifact }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
       CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
@@ -427,6 +444,29 @@ jobs:
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
+
+      - name: Download formatted repaired Codex patch
+        if: inputs.formatter == 'prettier'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-formatted
+
+      - name: Adopt formatted repaired Codex patch
+        if: inputs.formatter == 'prettier'
+        run: |
+          python3 -I "${CODEX_RUNTIME_PATH}/.github/scripts/codex-adopt-formatted-patch.py" \
+            --output-dir "$RUNNER_TEMP/codex-output" \
+            --verified-dir "$RUNNER_TEMP/codex-formatted"
+
+      - name: Upload formatted repaired Codex output
+        if: inputs.formatter == 'prettier'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ env.CODEX_PUBLISHED_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Materialize candidate policy tree
         env:
@@ -465,7 +505,7 @@ jobs:
       - name: Record selected Codex artifacts
         id: selected-artifacts
         run: |
-          echo "output_artifact=${CODEX_OUTPUT_ARTIFACT}" >>"$GITHUB_OUTPUT"
+          echo "output_artifact=${CODEX_PUBLISHED_OUTPUT_ARTIFACT}" >>"$GITHUB_OUTPUT"
           echo "verified_artifact=${CODEX_VERIFIED_ARTIFACT}" >>"$GITHUB_OUTPUT"
 
       - name: Download verified repaired Codex output
@@ -560,7 +600,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: ${{ inputs.node_version }}
+          node-version: ${{ inputs.node_version_file == '' && inputs.node_version || '' }}
+          node-version-file: ${{ inputs.node_version_file }}
 
       - name: Enable Corepack
         run: corepack enable
@@ -575,6 +616,7 @@ jobs:
         id: verify
         env:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          CODEX_FRONTEND_FAST_COMMAND: ${{ inputs.frontend_fast_command }}
         run: |
           set +e
           ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-verify.sh >"$RUNNER_TEMP/codex-repaired-pr-verification.log" 2>&1

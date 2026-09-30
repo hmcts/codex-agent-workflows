@@ -52,6 +52,8 @@ flowchart LR
 | [`codex-jira-collect.sh`](../.github/scripts/codex-jira-collect.sh) | Trusted collection | Converts validated model output into patch, metadata and PR-body artifacts. |
 | [`collect-codex-patch-result.py`](../.github/scripts/collect-codex-patch-result.py) | Trusted collection | Strictly parses the structured patch result and enforces its path scope. |
 | [`codex-jira-verify.sh`](../.github/scripts/codex-jira-verify.sh) | Credential-free verification | Applies and verifies the patch, checks guardrail changes and runs caller verification. |
+| [`codex-format-changed-files.sh`](../.github/scripts/codex-format-changed-files.sh) | Credential-free verification | Optionally formats the files a Codex patch changed and rebuilds the patch. |
+| [`codex-adopt-formatted-patch.py`](../.github/scripts/codex-adopt-formatted-patch.py) | Trusted publication | Checks the formatted patch against the verification record and the Codex patch's files before publication uses it. |
 | [`check-codex-pr-safety.rb`](../.github/scripts/check-codex-pr-safety.rb) | Security policy | Blocks workflow revisions that could expose credentials or write permissions to generated code. |
 | [`codex-prepare-policy-candidate.sh`](../.github/scripts/codex-prepare-policy-candidate.sh) | Security policy | Materialises exact candidate and trusted workflow trees for the safety checker. |
 | [`codex-verify-publisher.py`](../.github/scripts/codex-verify-publisher.py) | Trusted publication | Verifies the GitHub App installation, repository access and bot identity. |
@@ -198,6 +200,10 @@ to workflow and build guardrails, prepares the candidate and trusted workflow tr
 and runs `check-codex-pr-safety.rb` before executing the caller-owned verification
 adapter.
 
+When `CODEX_FORMATTER` is `prettier`, the script runs `codex-format-changed-files.sh`
+after the safety gate and records the formatted patch's hash. It passes
+`CODEX_FRONTEND_FAST_COMMAND` to the local pipeline as `FRONTEND_FAST_COMMAND`.
+
 It removes user and system Git configuration, disables hooks and credential helpers,
 blocks the file protocol, and runs verification with a minimal environment. The
 trusted pipeline wrapper is hash-checked immediately before execution.
@@ -209,6 +215,37 @@ mismatch stops verification and prevents normal ready-PR publication. The workfl
 retries the recognised transient Chrome/Puppeteer runner failure once. A persistent
 match is treated as an environment failure, which prevents model repair calls and
 publishes a draft with the failure evidence.
+
+### `codex-format-changed-files.sh`
+
+**Context:** Credential-free verification, after the safety gate, in a checkout whose
+index holds the applied patch.
+
+With `CODEX_FORMATTER=prettier`, the script runs Prettier on the regular files the
+patch adds or modifies. Prettier runs through the Yarn release pinned by `yarnPath` in
+`.yarnrc.yml`, which must be a file inside the repository. The script installs
+dependencies with `--immutable --mode=skip-build` when Prettier is missing. It fails
+if formatting changes a tracked file outside the patch, creates an untracked file,
+stages a file outside the patch or leaves the patch empty. Otherwise it rebuilds the
+patch in place from the index. With `none` it does nothing; any other value exits `2`.
+
+The formatter executes repository code, so its output is untrusted. The rebuilt patch
+reaches publication only through `codex-adopt-formatted-patch.py`.
+
+### `codex-adopt-formatted-patch.py`
+
+**Context:** Trusted publication, before the candidate policy tree is materialised.
+
+The script replaces the downloaded Codex patch with the formatted patch from the
+verified artifact. It first checks that:
+
+- the formatted patch is a regular file whose SHA-256 matches `patch_sha` in
+  `verification.env`;
+- both patches parse with the collector's strict parser; and
+- the formatted patch touches only files the Codex patch touches, counting rename
+  and copy sources.
+
+A refused patch stops the job before the safety gate and token minting.
 
 ### `check-codex-pr-safety.rb`
 

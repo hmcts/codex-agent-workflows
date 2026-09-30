@@ -42,6 +42,18 @@ on:
       runner_label:
         required: true
         type: string
+      formatter:
+        required: false
+        default: none
+        type: string
+      node_version_file:
+        required: false
+        default: ''
+        type: string
+      frontend_fast_command:
+        required: false
+        default: ''
+        type: string
       node_version:
         required: false
         default: "22"
@@ -93,6 +105,9 @@ jobs:
     uses: ./.github/workflows/codex-verify-initial.yml
     with:
       node_version: ${{ inputs.node_version }}
+      formatter: ${{ inputs.formatter }}
+      node_version_file: ${{ inputs.node_version_file }}
+      frontend_fast_command: ${{ inputs.frontend_fast_command }}
       java_version: ${{ inputs.java_version }}
       has_changes: ${{ inputs.has_changes }}
       branch_name: ${{ inputs.branch_name }}
@@ -117,6 +132,9 @@ jobs:
       runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
+      formatter: ${{ inputs.formatter }}
+      node_version_file: ${{ inputs.node_version_file }}
+      frontend_fast_command: ${{ inputs.frontend_fast_command }}
       java_version: ${{ inputs.java_version }}
       attempt: "1"
       max_attempts: "3"
@@ -149,6 +167,9 @@ jobs:
       runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
+      formatter: ${{ inputs.formatter }}
+      node_version_file: ${{ inputs.node_version_file }}
+      frontend_fast_command: ${{ inputs.frontend_fast_command }}
       java_version: ${{ inputs.java_version }}
       attempt: "2"
       max_attempts: "3"
@@ -181,6 +202,9 @@ jobs:
       runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
+      formatter: ${{ inputs.formatter }}
+      node_version_file: ${{ inputs.node_version_file }}
+      frontend_fast_command: ${{ inputs.frontend_fast_command }}
       java_version: ${{ inputs.java_version }}
       attempt: "3"
       max_attempts: "3"

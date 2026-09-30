@@ -30,6 +30,10 @@ on:
         required: false
         default: "10"
         type: string
+      formatter:
+        required: false
+        default: none
+        type: string
       branch_name:
         required: true
         type: string
@@ -381,6 +385,7 @@ jobs:
       POLICY_CANDIDATE_BASE_SHA: ${{ inputs.source_sha }}
       JIRA_PUBLISH_MODE: initial
       CODEX_OUTPUT_ARTIFACT: ${{ inputs.output_artifact }}
+      CODEX_PUBLISHED_OUTPUT_ARTIFACT: ${{ inputs.formatter == 'prettier' && format('{0}-formatted', inputs.output_artifact) || inputs.output_artifact }}
       CODEX_VERIFIED_ARTIFACT: ${{ inputs.verified_artifact }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}
       CODEX_JIRA_PR_NOTIFY_TIMEOUT_SECONDS: ${{ inputs.jira_notify_timeout_seconds }}
@@ -409,6 +414,29 @@ jobs:
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
+
+      - name: Download formatted Codex patch
+        if: inputs.formatter == 'prettier'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-formatted
+
+      - name: Adopt formatted Codex patch
+        if: inputs.formatter == 'prettier'
+        run: |
+          python3 -I "${CODEX_RUNTIME_PATH}/.github/scripts/codex-adopt-formatted-patch.py" \
+            --output-dir "$RUNNER_TEMP/codex-output" \
+            --verified-dir "$RUNNER_TEMP/codex-formatted"
+
+      - name: Upload formatted Codex output
+        if: inputs.formatter == 'prettier'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ env.CODEX_PUBLISHED_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Materialize candidate policy tree
         env:
@@ -447,7 +475,7 @@ jobs:
       - name: Record selected Codex artifacts
         id: selected-artifacts
         run: |
-          echo "output_artifact=${CODEX_OUTPUT_ARTIFACT}" >>"$GITHUB_OUTPUT"
+          echo "output_artifact=${CODEX_PUBLISHED_OUTPUT_ARTIFACT}" >>"$GITHUB_OUTPUT"
           echo "verified_artifact=${CODEX_VERIFIED_ARTIFACT}" >>"$GITHUB_OUTPUT"
 
       - name: Download verified Codex output
