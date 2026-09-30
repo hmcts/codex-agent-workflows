@@ -40,3 +40,12 @@ The local pipeline must be credential-free and must not fetch or execute untrust
 ## Publication behaviour
 
 Passing verification produces a ready-for-review PR. When all available repair attempts fail, the latest structurally valid patch is published as a draft with the verification failure attached. Sensitive changes are allowed but must be highlighted in the PR body.
+
+## Plan policy
+
+`plan_policy` on the implementation workflow is `standard` (default) or `strict`, and any other value fails plan validation.
+
+- **Forbidden paths:** a strict plan fails validation if any planned or sensitive path is under `.github`, or is part of the tooling that runs verification. That tooling is `bin/`, `buildSrc/`, `gradle/` and `.yarn/`, and the repository-root `build.gradle`, `settings.gradle`, `gradle.properties`, `gradlew`, `gradlew.bat`, `init.gradle`, `package.json`, `yarn.lock`, `.yarnrc.yml`, `.nvmrc`, `.pnp.cjs` and `.pnp.loader.mjs`.
+- **Not ready:** a strict plan that is high-risk or cross-system is marked not ready, with the reason as its blocker, so no implementation runs.
+
+With `standard`, those paths are allowed when the plan lists them in `sensitive_files`, and high-risk or cross-system plans can proceed.

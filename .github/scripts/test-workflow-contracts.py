@@ -185,6 +185,16 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("permissions: {}", job)
         self.assertIn("--status failed", job)
 
+    def test_plan_policy_is_optional_and_reaches_plan_validation(self):
+        content = IMPLEMENT_WORKFLOW.read_text(encoding="utf-8")
+        self.assertRegex(content, r"(?m)^      plan_policy:\n(?:        [^\n]+\n)*?        default: standard\n")
+        plan_job = content[content.index("\n  plan:\n") : content.index("\n  generate:\n")]
+        self.assertIn("      plan_policy: ${{ inputs.plan_policy }}\n", plan_job)
+        plan_stage = (ROOT / "workflows" / "codex-plan.yml").read_text(encoding="utf-8")
+        validation = plan_stage[plan_stage.index("- name: Validate and normalise Codex plan") :]
+        validation = validation[: validation.index("\n      - name: ")]
+        self.assertIn("CODEX_PLAN_POLICY: ${{ inputs.plan_policy }}", validation)
+
     def test_release_updater_uses_contract_migrator(self):
         content = UPDATER_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(".github/scripts/update-caller-workflow.py", content)

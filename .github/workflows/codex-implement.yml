@@ -3,6 +3,11 @@ name: Codex implementation
 on:
   workflow_call:
     inputs:
+      plan_policy:
+        description: "standard, or strict: refuse plans that touch .github or the build and dependency tooling, and leave high-risk or cross-system plans to people"
+        required: false
+        default: standard
+        type: string
       issueKey:
         description: Jira issue key
         required: true
@@ -131,6 +136,7 @@ jobs:
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
       jira_notify_timeout_seconds: ${{ inputs.jira_notify_timeout_seconds }}
+      plan_policy: ${{ inputs.plan_policy }}
     secrets:
       CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
       CODEX_JIRA_PR_NOTIFY_URL: ${{ secrets.CODEX_JIRA_PR_NOTIFY_URL }}

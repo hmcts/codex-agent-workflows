@@ -39,7 +39,9 @@ def valid_plan() -> dict:
 
 
 class ValidateCodexPlanTest(unittest.TestCase):
-    def run_validator(self, plan: object) -> tuple[subprocess.CompletedProcess[str], Path]:
+    def run_validator(
+        self, plan: object, policy: str | None = None
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
         root = Path(temp_dir.name)
@@ -51,6 +53,9 @@ class ValidateCodexPlanTest(unittest.TestCase):
             "OUTPUT_DIR": str(output_dir),
             "GITHUB_OUTPUT": str(github_output),
         }
+        environment.pop("CODEX_PLAN_POLICY", None)
+        if policy is not None:
+            environment["CODEX_PLAN_POLICY"] = policy
         result = subprocess.run(
             ["python3", str(SCRIPT)],
             env=environment,
@@ -206,6 +211,77 @@ class ValidateCodexPlanTest(unittest.TestCase):
         result, _ = self.run_validator(plan)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must be listed in sensitive_files", result.stderr)
+
+    def test_strict_policy_accepts_an_ordinary_small_plan(self) -> None:
+        result, root = self.run_validator(valid_plan(), policy="strict")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        outputs = self.outputs(root)
+        self.assertEqual(outputs["ready_to_implement"], "true")
+        materialized, _ = self.run_materializer(outputs["plan_payload"], outputs["plan_sha256"])
+        self.assertEqual(materialized.returncode, 0, materialized.stderr)
+
+    def test_strict_policy_refuses_automation_metadata(self) -> None:
+        plan = valid_plan()
+        plan["implementation_steps"][0]["path"] = ".github/workflows/unsafe.yml"
+        plan["sensitive_files"] = [".github/workflows/unsafe.yml"]
+        result, _ = self.run_validator(plan)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result, _ = self.run_validator(plan, policy="strict")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("implementation_steps[0].path targets protected automation metadata", result.stderr)
+
+    def test_strict_policy_refuses_verification_tooling(self) -> None:
+        for path in (
+            "build.gradle",
+            "settings.gradle",
+            "gradle.properties",
+            "gradlew",
+            "gradlew.bat",
+            "init.gradle",
+            "gradle/wrapper/gradle-wrapper.jar",
+            "buildSrc/src/main/java/Plugin.java",
+            "bin/codex-local-pipeline.sh",
+            "package.json",
+            "yarn.lock",
+            ".yarnrc.yml",
+            ".nvmrc",
+            ".pnp.cjs",
+            ".pnp.loader.mjs",
+            ".yarn/releases/yarn-4.cjs",
+        ):
+            with self.subTest(path=path):
+                plan = valid_plan()
+                plan["implementation_steps"][0]["path"] = path
+                plan["sensitive_files"] = [path]
+                result, _ = self.run_validator(plan, policy="strict")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("targets verification-sensitive tooling", result.stderr)
+
+    def test_strict_policy_leaves_high_risk_and_cross_system_plans_to_people(self) -> None:
+        for changes, blocker in (
+            ({"risk_level": "high"}, "High-risk changes are outside the auto-approved small-bug workflow."),
+            (
+                {"cross_system_change": True},
+                "Cross-system changes are outside the auto-approved single-repository workflow.",
+            ),
+        ):
+            with self.subTest(changes=changes):
+                plan = valid_plan()
+                plan.update(changes)
+                result, root = self.run_validator(plan, policy="strict")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                outputs = self.outputs(root)
+                self.assertEqual(outputs["ready_to_implement"], "false")
+                self.assertIn(blocker, outputs["blockers_summary"])
+                normalised = json.loads((root / "output" / "plan.json").read_text(encoding="utf-8"))
+                self.assertEqual(normalised["blockers"], [blocker])
+                materialized, _ = self.run_materializer(outputs["plan_payload"], outputs["plan_sha256"])
+                self.assertNotEqual(materialized.returncode, 0)
+
+    def test_unknown_plan_policy_fails_before_validation(self) -> None:
+        result, _ = self.run_validator(valid_plan(), policy="lenient")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("CODEX_PLAN_POLICY must be standard or strict", result.stderr)
 
     def test_rejects_git_metadata_path(self) -> None:
         plan = valid_plan()

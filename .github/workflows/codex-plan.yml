@@ -3,6 +3,10 @@ name: Codex plan stage
 on:
   workflow_call:
     inputs:
+      plan_policy:
+        required: false
+        default: standard
+        type: string
       issueKey:
         required: true
         type: string
@@ -175,6 +179,7 @@ jobs:
         id: validate
         env:
           CODEX_PLAN_RESULT: ${{ needs.codex-plan-action.outputs.codex_result }}
+          CODEX_PLAN_POLICY: ${{ inputs.plan_policy }}
           OUTPUT_DIR: ${{ runner.temp }}/codex-plan
         run: ${CODEX_RUNTIME_PATH}/.github/scripts/validate-codex-plan.py
 
