@@ -107,11 +107,13 @@ def render_initiator(value):
 
 
 initiator = render_initiator(os.environ.get("JIRA_INITIATOR_DISPLAY_NAME", ""))
+# Caller repositories are public: the plan's assumptions, risks and affected
+# systems stay out of the PR body. Only the review flags are published.
 review_flag = ""
 if plan["risk_level"] == "high" or plan["cross_system_change"] or plan["sensitive_files"]:
     review_flag = (
         "**Prominent reviewer flag:** this plan includes high-risk, cross-system, or "
-        "sensitive-file work. Review the scope, assumptions, and affected systems before approval.\n\n"
+        "sensitive-file work. Review the scope carefully before approval.\n\n"
     )
 
 body = f"""### Jira link
@@ -132,7 +134,7 @@ Codex ran on the Azure AKS team-managed runner scale set using the Jira issue co
 
 {summary}
 
-### Implementation plan and review flags
+### Review flags
 
 {review_flag}- Risk level: **{plan['risk_level']}**
 - Cross-system change: **{'yes' if plan['cross_system_change'] else 'no'}**
@@ -140,18 +142,6 @@ Codex ran on the Azure AKS team-managed runner scale set using the Jira issue co
 #### Sensitive files
 
 {bullets(plan['sensitive_files'])}
-
-#### Affected systems
-
-{bullets(plan['affected_systems'])}
-
-#### Assumptions
-
-{bullets(plan['assumptions'])}
-
-#### Risks
-
-{bullets(plan['risks'])}
 
 ### Testing done
 

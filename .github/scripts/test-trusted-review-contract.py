@@ -268,6 +268,18 @@ jobs:
                     trusted_workflows={"codex_pr_review.yml": wrapper},
                 )
 
+    def test_trusted_review_accepts_the_publication_policies(self):
+        wrapper = trusted_review_wrapper().replace(
+            '      java_version: "17"\n',
+            '      java_version: "17"\n      publish_policy: verified-only\n      cannot_be_built: repair\n',
+            1,
+        )
+        completed = self.run_check(
+            {"codex_pr_review.yml": wrapper},
+            trusted_workflows={"codex_pr_review.yml": wrapper},
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_other_automatic_revision_event_roots_are_protected(self):
         triggers = {
             "create": "on: create",
