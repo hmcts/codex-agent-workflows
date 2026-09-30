@@ -51,6 +51,7 @@ TRUSTED_REVIEW_INPUTS = %w[
   runner_label
   model_environment
   publisher_environment
+  review_repair_rounds
   node_version
   java_version
   formatter

@@ -25,6 +25,7 @@ POST_REPAIR = WORKFLOW_ROOT / "codex-post-repair.yml"
 REVIEW_GENERATE = WORKFLOW_ROOT / "codex-review-generate.yml"
 REVIEW_PUBLISH = WORKFLOW_ROOT / "codex-review-publish.yml"
 REVIEW_REPAIR = WORKFLOW_ROOT / "codex-review-repair.yml"
+REVIEW_REPAIR_ROUND = WORKFLOW_ROOT / "codex-review-repair-round.yml"
 
 FORWARD_FORMATTER = "formatter: ${{ inputs.formatter }}"
 FORWARD_NODE_VERSION_FILE = "node_version_file: ${{ inputs.node_version_file }}"
@@ -96,6 +97,9 @@ class FrontendVerificationOptionTests(unittest.TestCase):
             (REVIEW, "generate-and-verify"): {"formatter", "node_version_file", "frontend_fast_command"},
             (REVIEW, "publish"): {"formatter"},
             (REVIEW, "repair"): {"formatter", "node_version_file", "frontend_fast_command"},
+            (REVIEW, "verification-repair-1"): {"formatter", "node_version_file", "frontend_fast_command"},
+            (REVIEW, "verification-repair-2"): {"formatter", "node_version_file", "frontend_fast_command"},
+            (REVIEW, "verification-repair-3"): {"formatter", "node_version_file", "frontend_fast_command"},
             (REVIEW, "terminal-failure"): set(),
         }
         forwards = {
@@ -125,7 +129,7 @@ class FrontendVerificationOptionTests(unittest.TestCase):
                     "          node-version-file: ${{ inputs.node_version_file }}\n",
                     workflow.name,
                 )
-        self.assertEqual(setups, 7)
+        self.assertEqual(setups, 8)
 
     def test_verifiers_format_only_before_publication(self):
         formatting = {
@@ -134,6 +138,7 @@ class FrontendVerificationOptionTests(unittest.TestCase):
             (POST_REPAIR, "verify-published-pr-repair-1", "Verify repaired Codex patch before re-publish"),
             (REVIEW_GENERATE, "codex-review-verify", "Verify Codex review patch"),
             (REVIEW_REPAIR, "codex-review-external-repair-verify", "Verify external-status repair patch"),
+            (REVIEW_REPAIR_ROUND, "verify-review-repair", "Verify repaired review patch"),
         }
         published = {
             (POST_VERIFY, "verify-published-pr-patch", "Verify published PR patch without credentials"),
@@ -159,6 +164,7 @@ class FrontendVerificationOptionTests(unittest.TestCase):
             (POST_REPAIR, "verify-published-pr-repair-1", "Upload verified repaired Codex output"),
             (REVIEW_GENERATE, "codex-review-verify", "Upload verified Codex review output"),
             (REVIEW_REPAIR, "codex-review-external-repair-verify", "Upload verified external-status repair"),
+            (REVIEW_REPAIR_ROUND, "verify-review-repair", "Upload verified repaired review output"),
         ):
             with self.subTest(workflow=workflow.name, step=step_name):
                 upload = step(job(workflow, name), step_name)
@@ -168,7 +174,7 @@ class FrontendVerificationOptionTests(unittest.TestCase):
         for workflow, name, verified_artifact, uploads in (
             (PUBLISH, "publish-pr", "${{ env.CODEX_VERIFIED_ARTIFACT }}", True),
             (POST_REPAIR, "publish-published-pr-repair-1", "${{ env.CODEX_VERIFIED_ARTIFACT }}", True),
-            (REVIEW_PUBLISH, "codex-review-publish", "codex-review-verified", False),
+            (REVIEW_PUBLISH, "codex-review-publish", "${{ inputs.verified_artifact }}", False),
             (REVIEW_REPAIR, "codex-review-external-republish", "${{ env.CODEX_VERIFIED_ARTIFACT }}", False),
         ):
             with self.subTest(workflow=workflow.name, job=name):

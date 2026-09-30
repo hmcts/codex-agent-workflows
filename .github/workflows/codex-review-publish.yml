@@ -51,6 +51,14 @@ on:
       verification_passed:
         required: true
         type: string
+      output_artifact:
+        required: false
+        default: codex-review-output
+        type: string
+      verified_artifact:
+        required: false
+        default: codex-review-verified
+        type: string
     outputs:
       pr_number:
         value: ${{ jobs.codex-review-publish.outputs.pr_number }}
@@ -87,8 +95,8 @@ jobs:
     outputs:
       pr_number: ${{ steps.publish.outputs.pr_number }}
       commit_sha: ${{ steps.publish.outputs.commit_sha }}
-      output_artifact: codex-review-output
-      verified_artifact: codex-review-verified
+      output_artifact: ${{ inputs.output_artifact }}
+      verified_artifact: ${{ inputs.verified_artifact }}
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       EXPECTED_PR_NUMBER: ${{ inputs.pr_number }}
@@ -133,14 +141,14 @@ jobs:
       - name: Download Codex review output
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: codex-review-output
+          name: ${{ inputs.output_artifact }}
           path: ${{ runner.temp }}/codex-output
 
       - name: Download formatted Codex review patch
         if: inputs.formatter == 'prettier'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: codex-review-verified
+          name: ${{ inputs.verified_artifact }}
           path: ${{ runner.temp }}/codex-formatted
 
       - name: Adopt formatted Codex review patch
@@ -192,7 +200,7 @@ jobs:
       - name: Download verified Codex review output
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: codex-review-verified
+          name: ${{ inputs.verified_artifact }}
           path: ${{ runner.temp }}/codex-verified
 
       - name: Publish Codex review feedback

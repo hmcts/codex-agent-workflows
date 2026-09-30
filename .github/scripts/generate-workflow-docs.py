@@ -101,6 +101,8 @@ flowchart LR
     Feedback --> Model[Review repair model]
     Model --> Artifact[(Structured patch artifact)]
     Artifact --> Verify[Credential-free verification]
+    Verify -->|failed, when review_repair_rounds is set| Repair[Review repair round]
+    Repair --> Verify
     Verify --> Publish[GitHub App update]
     Publish --> Status[Required checks and Jira callback]
 ```

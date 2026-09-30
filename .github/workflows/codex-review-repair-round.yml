@@ -1,0 +1,333 @@
+name: Codex review repair and verification round
+
+on:
+  workflow_call:
+    inputs:
+      model_environment:
+        description: Caller environment gating model credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+      publisher_environment:
+        description: Caller environment gating publishing credentials; empty to skip
+        required: false
+        default: ''
+        type: string
+
+      runner_group:
+        required: true
+        type: string
+      runner_label:
+        required: true
+        type: string
+      formatter:
+        required: false
+        default: none
+        type: string
+      node_version_file:
+        required: false
+        default: ''
+        type: string
+      frontend_fast_command:
+        required: false
+        default: ''
+        type: string
+      node_version:
+        required: false
+        default: "22"
+        type: string
+      java_version:
+        required: false
+        default: "21"
+        type: string
+      attempt:
+        required: true
+        type: string
+      max_attempts:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      head_ref:
+        required: true
+        type: string
+      base_ref:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      trusted_sha:
+        required: true
+        type: string
+      source_artifact:
+        required: true
+        type: string
+      input_artifact:
+        required: true
+        type: string
+      failure_artifact:
+        required: true
+        type: string
+    outputs:
+      has_changes:
+        value: ${{ jobs.collect-review-repair.outputs.has_changes }}
+      passed:
+        value: ${{ jobs.verify-review-repair.outputs.passed }}
+      output_artifact:
+        value: ${{ jobs.verify-review-repair.outputs.output_artifact }}
+      verified_artifact:
+        value: ${{ jobs.verify-review-repair.outputs.verified_artifact }}
+      failure_artifact:
+        value: ${{ jobs.verify-review-repair.outputs.failure_artifact }}
+    secrets:
+      CODEX_OPENAI_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  review-repair-action:
+    environment: ${{ inputs.model_environment }}
+    runs-on:
+      group: ${{ inputs.runner_group }}
+      labels: ${{ inputs.runner_label }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      pr_number: ${{ steps.prepare.outputs.pr_number }}
+      head_ref: ${{ steps.prepare.outputs.head_ref }}
+      base_ref: ${{ steps.prepare.outputs.base_ref }}
+      comment_author: ${{ steps.prepare.outputs.comment_author }}
+      comment_url: ${{ steps.prepare.outputs.comment_url }}
+      codex_result: ${{ steps.codex-action.outputs.final-message }}
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      REPAIR_ATTEMPT: ${{ inputs.attempt }}
+      MAX_CODEX_REPAIR_ATTEMPTS: ${{ inputs.max_attempts }}
+      CODEX_INPUT_ARTIFACT: ${{ inputs.input_artifact }}
+      CODEX_FAILURE_ARTIFACT: ${{ inputs.failure_artifact }}
+      EXPECTED_HEAD_SHA: ${{ inputs.head_sha }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: $/.github/actions/runtime
+
+      - name: Checkout trusted repair tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.trusted_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify runner toolchain
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-runner-preflight.sh
+
+      - name: Download Codex review output to repair
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ env.CODEX_INPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-input
+
+      - name: Download review verification failure
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ env.CODEX_FAILURE_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-failure
+
+      - name: Prepare review repair prompt
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_DIR: ${{ runner.temp }}/codex-input
+          FAILURE_DIR: ${{ runner.temp }}/codex-failure
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-repair.sh
+
+      - name: Check the model credential is available
+        env:
+          CODEX_OPENAI_API_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
+        run: |
+          if [[ -z "${CODEX_OPENAI_API_KEY}" ]]; then
+            echo "::error title=Missing model credential::CODEX_OPENAI_API_KEY is empty. Pass it from the caller, or set it in the caller's model environment."
+            exit 1
+          fi
+      - name: Run Codex review repair
+        id: codex-action
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        with:
+          allow-bot-users: hmcts-pr-publisher[bot]
+          openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
+          responses-api-endpoint: https://eu.api.openai.com/v1/responses
+          codex-version: '0.146.0'
+          model: gpt-5.6-sol
+          effort: medium
+          prompt-file: ${{ steps.prepare.outputs.prompt_path }}
+          output-schema-file: ${{ steps.prepare.outputs.schema_path }}
+          working-directory: .
+          permission-profile: ':workspace'
+          safety-strategy: unprivileged-user
+          codex-user: codex
+          codex-args: '["--ephemeral"]'
+
+  collect-review-repair:
+    needs: review-repair-action
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      has_changes: ${{ steps.repair.outputs.has_changes }}
+    env:
+      CODEX_INPUT_ARTIFACT: ${{ inputs.input_artifact }}
+      CODEX_OUTPUT_ARTIFACT: codex-review-output-repair-${{ inputs.attempt }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: $/.github/actions/runtime
+
+      - name: Checkout trusted collector
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.trusted_sha }}
+          persist-credentials: false
+
+      - name: Download Codex review output being repaired
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ env.CODEX_INPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-input
+
+      - name: Materialise repaired review patch
+        id: repair
+        env:
+          CODEX_RESULT: ${{ needs.review-repair-action.outputs.codex_result }}
+          INPUT_DIR: ${{ runner.temp }}/codex-input
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          REPAIR_ATTEMPT: ${{ inputs.attempt }}
+          PR_NUMBER: ${{ needs.review-repair-action.outputs.pr_number }}
+          HEAD_REF: ${{ needs.review-repair-action.outputs.head_ref }}
+          BASE_REF: ${{ needs.review-repair-action.outputs.base_ref }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          COMMENT_AUTHOR: ${{ needs.review-repair-action.outputs.comment_author }}
+          COMMENT_URL: ${{ needs.review-repair-action.outputs.comment_url }}
+        run: ${CODEX_RUNTIME_PATH}/.github/scripts/codex-pr-review-repair-collect.sh
+
+      - name: Upload repaired review output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+          if-no-files-found: error
+          retention-days: 1
+
+  verify-review-repair:
+    needs: collect-review-repair
+    if: needs.collect-review-repair.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions: {}
+    outputs:
+      passed: ${{ steps.verify.outputs.passed || 'false' }}
+      output_artifact: codex-review-output-repair-${{ inputs.attempt }}
+      verified_artifact: ${{ steps.verify.outputs.passed == 'true' && format('codex-review-verified-repair-{0}', inputs.attempt) || '' }}
+      failure_artifact: ${{ steps.verify.outputs.passed == 'false' && format('codex-review-verification-failure-repair-{0}', inputs.attempt) || '' }}
+    env:
+      EXPECTED_PR_NUMBER: ${{ inputs.pr_number }}
+      EXPECTED_HEAD_REF: ${{ inputs.head_ref }}
+      EXPECTED_BASE_REF: ${{ inputs.base_ref }}
+      EXPECTED_HEAD_SHA: ${{ inputs.head_sha }}
+      EXPECTED_BASE_SHA: ${{ inputs.base_sha }}
+      LOCAL_PIPELINE_MODE: fast
+      CODEX_OUTPUT_ARTIFACT: codex-review-output-repair-${{ inputs.attempt }}
+      CODEX_VERIFIED_ARTIFACT: codex-review-verified-repair-${{ inputs.attempt }}
+      CODEX_FAILURE_ARTIFACT: codex-review-verification-failure-repair-${{ inputs.attempt }}
+
+    steps:
+      - name: Locate trusted Codex runtime
+        uses: $/.github/actions/runtime
+
+      - name: Download credential-free review source
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: ${{ runner.temp }}/codex-review-verification-source
+
+      - name: Restore credential-free review source
+        run: tar -xzf "$RUNNER_TEMP/codex-review-verification-source/codex-review-source.tar.gz" -C "$GITHUB_WORKSPACE"
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ inputs.node_version_file == '' && inputs.node_version || '' }}
+          node-version-file: ${{ inputs.node_version_file }}
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Download repaired review output
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-output
+
+      - name: Verify repaired review patch
+        id: verify
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
+          TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-safety/trusted-check-codex-pr-safety.rb
+          TRUSTED_POLICY_PREPARER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-prepare-policy-candidate.sh
+          TRUSTED_FORMATTER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-format-changed-files.sh
+          CODEX_FORMATTER: ${{ inputs.formatter }}
+          CODEX_FRONTEND_FAST_COMMAND: ${{ inputs.frontend_fast_command }}
+        run: |
+          set +e
+          bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh" >"$RUNNER_TEMP/codex-review-repair-verification.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/codex-review-repair-verification.log"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            mkdir -p "$RUNNER_TEMP/codex-review-repair-verification-failure"
+            cp "$RUNNER_TEMP/codex-review-repair-verification.log" "$RUNNER_TEMP/codex-review-repair-verification-failure/verification-failure.log"
+            tail -n 240 "$RUNNER_TEMP/codex-review-repair-verification.log" >"$RUNNER_TEMP/codex-review-repair-verification-failure/verification-failure-summary.log"
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Upload verified repaired review output
+        if: steps.verify.outputs.passed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
+          path: |
+            ${{ runner.temp }}/codex-output/changes.patch
+            ${{ runner.temp }}/codex-output/codex-review-comment.md
+            ${{ runner.temp }}/codex-output/guardrail-changes.txt
+            ${{ runner.temp }}/codex-output/verification.env
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload repaired review verification failure
+        if: steps.verify.outputs.passed == 'false'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ env.CODEX_FAILURE_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-review-repair-verification-failure
+          if-no-files-found: error
+          retention-days: 1
