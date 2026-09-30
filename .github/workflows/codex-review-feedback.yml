@@ -22,6 +22,21 @@ on:
         description: Repository-scoped ARC runner scale-set label
         required: true
         type: string
+      formatter:
+        description: "Formatter run on the files Codex changed before verification: none, or prettier (run through the Yarn release pinned in .yarnrc.yml). The formatted patch is the one published."
+        required: false
+        default: none
+        type: string
+      node_version_file:
+        description: Repository file pinning the Node.js version for verification, such as .nvmrc; replaces node_version when set
+        required: false
+        default: ''
+        type: string
+      frontend_fast_command:
+        description: FRONTEND_FAST_COMMAND for the local pipeline's fast checks, such as yarn lint; empty keeps the pipeline default
+        required: false
+        default: ''
+        type: string
       node_version:
         description: Node.js version provisioned for credential-free verification
         required: false
@@ -92,6 +107,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Refuse an unknown formatter
+        env:
+          FORMATTER: ${{ inputs.formatter }}
+        run: |
+          case "${FORMATTER}" in
+            none|prettier) ;;
+            *) echo "::error title=Unknown formatter::formatter must be none or prettier, not '${FORMATTER}'."; exit 1 ;;
+          esac
       - name: Refuse an unexpected runner group or label
         env:
           RUNNER_GROUP: ${{ inputs.runner_group }}
@@ -133,6 +156,9 @@ jobs:
       runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
+      formatter: ${{ inputs.formatter }}
+      node_version_file: ${{ inputs.node_version_file }}
+      frontend_fast_command: ${{ inputs.frontend_fast_command }}
       java_version: ${{ inputs.java_version }}
       is_codex_pr: ${{ needs.intake.outputs.is_codex_pr }}
       pr_number: ${{ needs.intake.outputs.pr_number }}
@@ -150,6 +176,7 @@ jobs:
       model_environment: ${{ inputs.model_environment }}
       publisher_environment: ${{ inputs.publisher_environment }}
       github_app_client_id: ${{ inputs.github_app_client_id }}
+      formatter: ${{ inputs.formatter }}
       required_status_context: ${{ inputs.required_status_context }}
       required_status_poll_seconds: ${{ inputs.required_status_poll_seconds }}
       required_status_timeout_seconds: ${{ inputs.required_status_timeout_seconds }}
@@ -179,6 +206,9 @@ jobs:
       runner_group: ${{ inputs.runner_group }}
       runner_label: ${{ inputs.runner_label }}
       node_version: ${{ inputs.node_version }}
+      formatter: ${{ inputs.formatter }}
+      node_version_file: ${{ inputs.node_version_file }}
+      frontend_fast_command: ${{ inputs.frontend_fast_command }}
       java_version: ${{ inputs.java_version }}
       github_app_client_id: ${{ inputs.github_app_client_id }}
       required_status_context: ${{ inputs.required_status_context }}

@@ -53,6 +53,9 @@ TRUSTED_REVIEW_INPUTS = %w[
   publisher_environment
   node_version
   java_version
+  formatter
+  node_version_file
+  frontend_fast_command
   github_app_client_id
   required_status_context
   required_status_poll_seconds

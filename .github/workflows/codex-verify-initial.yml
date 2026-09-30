@@ -3,6 +3,18 @@ name: Codex initial verification
 on:
   workflow_call:
     inputs:
+      formatter:
+        required: false
+        default: none
+        type: string
+      node_version_file:
+        required: false
+        default: ''
+        type: string
+      frontend_fast_command:
+        required: false
+        default: ''
+        type: string
       node_version:
         required: false
         default: "22"
@@ -78,7 +90,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: ${{ inputs.node_version }}
+          node-version: ${{ inputs.node_version_file == '' && inputs.node_version || '' }}
+          node-version-file: ${{ inputs.node_version_file }}
 
       - name: Enable Corepack
         run: corepack enable
@@ -93,6 +106,8 @@ jobs:
         id: verify
         env:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          CODEX_FORMATTER: ${{ inputs.formatter }}
+          CODEX_FRONTEND_FAST_COMMAND: ${{ inputs.frontend_fast_command }}
         run: |
           is_transient_browser_failure() {
             local log="$1"
@@ -155,6 +170,7 @@ jobs:
         with:
           name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
           path: |
+            ${{ runner.temp }}/codex-output/changes.patch
             ${{ runner.temp }}/codex-output/codex-pr-body.md
             ${{ runner.temp }}/codex-output/guardrail-changes.txt
             ${{ runner.temp }}/codex-output/verification.env

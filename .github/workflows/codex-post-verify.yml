@@ -14,6 +14,14 @@ on:
         default: ''
         type: string
 
+      node_version_file:
+        required: false
+        default: ''
+        type: string
+      frontend_fast_command:
+        required: false
+        default: ''
+        type: string
       node_version:
         required: false
         default: "22"
@@ -105,7 +113,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: ${{ inputs.node_version }}
+          node-version: ${{ inputs.node_version_file == '' && inputs.node_version || '' }}
+          node-version-file: ${{ inputs.node_version_file }}
 
       - name: Enable Corepack
         run: corepack enable
@@ -120,6 +129,7 @@ jobs:
         id: verify
         env:
           OUTPUT_DIR: ${{ runner.temp }}/codex-output
+          CODEX_FRONTEND_FAST_COMMAND: ${{ inputs.frontend_fast_command }}
         run: |
           set +e
           ${CODEX_RUNTIME_PATH}/.github/scripts/codex-jira-verify.sh >"$RUNNER_TEMP/codex-pr-verification.log" 2>&1

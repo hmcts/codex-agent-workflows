@@ -20,6 +20,18 @@ on:
       runner_label:
         required: true
         type: string
+      formatter:
+        required: false
+        default: none
+        type: string
+      node_version_file:
+        required: false
+        default: ''
+        type: string
+      frontend_fast_command:
+        required: false
+        default: ''
+        type: string
       node_version:
         required: false
         default: "22"
@@ -158,6 +170,7 @@ jobs:
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/check-codex-pr-safety.rb "$RUNNER_TEMP/trusted-safety/trusted-check-codex-pr-safety.rb"
           cp -R ${CODEX_RUNTIME_PATH}/.github/scripts/lib/codex_workflow_safety/. "$RUNNER_TEMP/trusted-safety/lib/codex_workflow_safety/"
           cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-prepare-policy-candidate.sh "$RUNNER_TEMP/trusted-codex-prepare-policy-candidate.sh"
+          cp ${CODEX_RUNTIME_PATH}/.github/scripts/codex-format-changed-files.sh "$RUNNER_TEMP/trusted-codex-format-changed-files.sh"
           cp ../trusted/bin/codex-local-pipeline.sh "$RUNNER_TEMP/trusted-codex-local-pipeline.sh"
           echo "head_sha=${PUBLISHED_HEAD_SHA}" >>"$GITHUB_OUTPUT"
           echo "base_sha=${BASE_SHA}" >>"$GITHUB_OUTPUT"
@@ -171,6 +184,7 @@ jobs:
             ${{ runner.temp }}/trusted-codex-pr-review-verify.sh
             ${{ runner.temp }}/trusted-safety
             ${{ runner.temp }}/trusted-codex-prepare-policy-candidate.sh
+            ${{ runner.temp }}/trusted-codex-format-changed-files.sh
             ${{ runner.temp }}/trusted-codex-local-pipeline.sh
           if-no-files-found: error
           retention-days: 1
@@ -360,7 +374,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: ${{ inputs.node_version }}
+          node-version: ${{ inputs.node_version_file == '' && inputs.node_version || '' }}
+          node-version-file: ${{ inputs.node_version_file }}
 
       - name: Enable Corepack
         run: corepack enable
@@ -378,6 +393,9 @@ jobs:
           TRUSTED_PIPELINE_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-local-pipeline.sh
           TRUSTED_PR_SAFETY_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-safety/trusted-check-codex-pr-safety.rb
           TRUSTED_POLICY_PREPARER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-prepare-policy-candidate.sh
+          TRUSTED_FORMATTER_PATH: ${{ runner.temp }}/codex-review-verification-source/trusted-codex-format-changed-files.sh
+          CODEX_FORMATTER: ${{ inputs.formatter }}
+          CODEX_FRONTEND_FAST_COMMAND: ${{ inputs.frontend_fast_command }}
         run: |
           set +e
           bash "$RUNNER_TEMP/codex-review-verification-source/trusted-codex-pr-review-verify.sh" >"$RUNNER_TEMP/codex-review-external-repair-verification.log" 2>&1
@@ -474,6 +492,20 @@ jobs:
         with:
           name: ${{ env.CODEX_OUTPUT_ARTIFACT }}
           path: ${{ runner.temp }}/codex-output
+
+      - name: Download formatted external-status repair patch
+        if: inputs.formatter == 'prettier'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ env.CODEX_VERIFIED_ARTIFACT }}
+          path: ${{ runner.temp }}/codex-formatted
+
+      - name: Adopt formatted external-status repair patch
+        if: inputs.formatter == 'prettier'
+        run: |
+          python3 -I "${CODEX_RUNTIME_PATH}/.github/scripts/codex-adopt-formatted-patch.py" \
+            --output-dir "$RUNNER_TEMP/codex-output" \
+            --verified-dir "$RUNNER_TEMP/codex-formatted"
 
       - name: Materialize candidate policy tree
         env:

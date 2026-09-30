@@ -50,6 +50,18 @@ Trusted planning, collection, repair, publication and security-validation script
 
 The local pipeline must be credential-free and must not fetch or execute untrusted remote content. Existing branch-required Jenkins, Sonar, functional and smoke checks remain authoritative after publication.
 
+## Optional verification settings
+
+Both reusable workflows take three optional inputs for frontend repositories. The defaults leave verification unchanged.
+
+- `formatter`: `none` (default) or `prettier`. With `prettier`, credential-free verification runs Prettier on the files Codex changed, after the credential safety gate and before the local pipeline. Prettier runs through the Yarn release that `yarnPath` in `.yarnrc.yml` pins; dependencies are installed with `--immutable --mode=skip-build` when Prettier is missing. Verification then checks the formatted files and records the formatted patch.
+  - Formatting may not change, create or stage any file outside the Codex patch, and it may not leave the patch empty. It may return a file to its original content, which drops that file from the patch.
+  - The publish job treats the formatted patch as untrusted. It adopts the patch only when its hash matches the recorded verification and it touches no file outside the Codex patch, counting rename and copy sources. The job then runs the credential safety gate on the formatted tree before minting a token. The formatted output feeds post-publication verification and repair.
+  - Draft PRs are still built from Codex's unformatted patch.
+  - Any value other than `none` or `prettier` fails the run before anything else starts.
+- `node_version_file`: a repository file that pins the Node.js version for verification, such as `.nvmrc`. When set, it replaces `node_version`.
+- `frontend_fast_command`: passed to the local pipeline as `FRONTEND_FAST_COMMAND` in every credential-free verification, such as `yarn lint`. When empty, the pipeline keeps its own default.
+
 ## Publication behaviour
 
 Passing verification produces a ready-for-review PR. When all available repair attempts fail, the latest structurally valid patch is published as a draft with the verification failure attached. Sensitive changes are allowed but must be highlighted in the PR body.

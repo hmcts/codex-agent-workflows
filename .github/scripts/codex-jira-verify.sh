@@ -28,6 +28,8 @@ trusted_pipeline_path="${artifact_dir}/trusted-codex-local-pipeline.sh"
 trusted_repository_root="${artifact_dir}/trusted-repository"
 safety_gate_path="${TRUSTED_PR_SAFETY_PATH:-${CODEX_RUNTIME_PATH:-}/.github/scripts/check-codex-pr-safety.rb}"
 policy_preparer_path="${TRUSTED_POLICY_PREPARER_PATH:-${CODEX_RUNTIME_PATH:-}/.github/scripts/codex-prepare-policy-candidate.sh}"
+formatter_path="${TRUSTED_FORMATTER_PATH:-${CODEX_RUNTIME_PATH:-}/.github/scripts/codex-format-changed-files.sh}"
+formatter="${CODEX_FORMATTER:-none}"
 trusted_pipeline_sha=""
 guardrail_review_required="false"
 guardrail_pathspecs=(
@@ -77,6 +79,9 @@ run_sanitized() {
 
   if [[ -n "${JAVA_HOME:-}" ]]; then
     sanitized_env+=("JAVA_HOME=${JAVA_HOME}")
+  fi
+  if [[ -n "${CODEX_FRONTEND_FAST_COMMAND:-}" ]]; then
+    sanitized_env+=("FRONTEND_FAST_COMMAND=${CODEX_FRONTEND_FAST_COMMAND}")
   fi
 
   "${sanitized_env[@]}" "$@"
@@ -192,6 +197,15 @@ fi
 run_sanitized ruby --disable-gems "${safety_gate_path}" \
   --repository-root . \
   --trusted-repository-root "${trusted_repository_root}"
+
+if [[ "${formatter}" != "none" ]]; then
+  if [[ ! -f "${formatter_path}" || -L "${formatter_path}" ]]; then
+    echo "Missing trusted formatter: ${formatter_path}" >&2
+    exit 1
+  fi
+  run_sanitized env CODEX_FORMATTER="${formatter}" bash "${formatter_path}" "${patch_path}"
+  patch_sha="$(file_sha256 "${patch_path}")"
+fi
 
 detect_guardrail_changes
 append_guardrail_warning
