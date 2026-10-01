@@ -144,21 +144,34 @@ jobs:
           name: ${{ inputs.output_artifact }}
           path: ${{ runner.temp }}/codex-output
 
+      - name: Read the review result
+        id: review-result
+        run: |
+          has_changes="$(awk -F= '$1 == "has_changes" { print $2; exit }' "$RUNNER_TEMP/codex-output/metadata.env")"
+          case "${has_changes}" in
+            true|false) ;;
+            *) echo "::error title=Unreadable review result::metadata.env must record has_changes as true or false."; exit 1 ;;
+          esac
+          echo "has_changes=${has_changes}" >>"$GITHUB_OUTPUT"
+
       - name: Download formatted Codex review patch
-        if: inputs.formatter == 'prettier'
+        if: inputs.formatter == 'prettier' && steps.review-result.outputs.has_changes == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ inputs.verified_artifact }}
           path: ${{ runner.temp }}/codex-formatted
 
       - name: Adopt formatted Codex review patch
-        if: inputs.formatter == 'prettier'
+        if: inputs.formatter == 'prettier' && steps.review-result.outputs.has_changes == 'true'
         run: |
           python3 -I "${CODEX_RUNTIME_PATH}/.github/scripts/codex-adopt-formatted-patch.py" \
             --output-dir "$RUNNER_TEMP/codex-output" \
             --verified-dir "$RUNNER_TEMP/codex-formatted"
 
+      # With no changes there is no patch to apply: the gate checks the PR head
+      # as it stands, and publication only posts Codex's comment.
       - name: Materialize candidate policy tree
+        if: steps.review-result.outputs.has_changes == 'true'
         env:
           CANDIDATE_ROOT: ${{ github.workspace }}/codex-policy-candidate
           EXPECTED_CANDIDATE_SHA: ${{ env.POLICY_CANDIDATE_BASE_SHA }}
