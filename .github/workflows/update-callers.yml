@@ -181,7 +181,9 @@ jobs:
             --repository-root "${gate_root}" \
             --trusted-repository-root "${gate_root}"
 
-          existing="$(gh pr list --repo "${TARGET_REPOSITORY}" --head "${branch}" --state open --json url --jq '.[0].url // empty')"
+          # --head matches the branch name in forks too, so only count a PR
+          # from the caller's own repository.
+          existing="$(gh pr list --repo "${TARGET_REPOSITORY}" --head "${branch}" --state open --json url,isCrossRepository --jq '[.[] | select(.isCrossRepository | not)] | .[0].url // empty')"
           if [[ -n "${existing}" ]]; then
             echo "Caller update already open: ${existing}"
             exit 0

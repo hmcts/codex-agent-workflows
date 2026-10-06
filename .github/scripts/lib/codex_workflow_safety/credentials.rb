@@ -116,8 +116,10 @@ def generated_pr_skip_applies?(workflow)
   !exposing.empty? && (exposing - HEAD_REF_EVENTS).empty?
 end
 
+# Compare the condition exactly. GitHub treats any text around ${{ }}, even the
+# newline a `|` block scalar keeps, as a string template that is always true.
 def skips_generated_pull_requests?(job)
-  job.is_a?(Hash) && job["if"].is_a?(String) && GENERATED_PR_SKIP_CONDITIONS.include?(job["if"].strip)
+  job.is_a?(Hash) && job["if"].is_a?(String) && GENERATED_PR_SKIP_CONDITIONS.include?(job["if"])
 end
 
 def enforce_policy!(entry, entries, inherited_permissions = nil, stack = [], skip_generated_prs: false)

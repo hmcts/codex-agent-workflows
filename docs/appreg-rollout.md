@@ -60,7 +60,7 @@ Raise one PR in each repository. Apps Reg reviews and merges them.
    Juror's wrapper is the model.
 3. **Merge-conflict command.** Delete `codex_merge_conflict_resolution.yml`.
 4. **Preview and CodeQL jobs.** In `close_pr.yaml` and `portal_redirect_pr.yml` (api), and `close-pr.yml`, `on-pr.yml` and `codeql.yaml` (frontend), add exactly `if: ${{ !startsWith(github.head_ref, 'codex/') }}` to each job the gate reports. These workflows use Azure secrets or `security-events: write` on `pull_request`.
-   - The condition must be the job's whole `if`, and the workflows must stay reachable only from `pull_request` or `pull_request_target`.
+   - The condition must be the job's whole `if`, written on one line as shown, and the workflows must stay reachable only from `pull_request` or `pull_request_target`.
    - A job that only `needs` a guarded job needs the condition too.
 5. **Local pipeline.** Remove the checks in `bin/codex-local-pipeline.sh` that assert the local Codex workflow structure, roughly lines 124 to 755. Keep the Flyway guards and the Gradle or Yarn steps. The pipeline must keep reading `FRONTEND_FAST_COMMAND`.
 6. **Prompt rules.** Move the repository-specific rules from the local prompts into `AGENTS.md`:
