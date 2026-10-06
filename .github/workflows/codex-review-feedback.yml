@@ -121,10 +121,8 @@ jobs:
             latest-review|current-reviews) ;;
             *) echo "::error title=Unknown review selection::review_selection must be latest-review or current-reviews, not '${REVIEW_SELECTION}'."; exit 1 ;;
           esac
-      - name: Checkout shared workflow repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
+      - name: Locate trusted Codex runtime
+        uses: $/.github/actions/runtime
       - name: Refuse an unknown formatter
         env:
           FORMATTER: ${{ inputs.formatter }}
@@ -145,7 +143,7 @@ jobs:
         env:
           RUNNER_GROUP: ${{ inputs.runner_group }}
           RUNNER_LABEL: ${{ inputs.runner_label }}
-        run: python3 -I .github/scripts/validate-runner-target.py
+        run: python3 -I "${CODEX_RUNTIME_PATH}/.github/scripts/validate-runner-target.py"
       - name: Refuse an unknown publication policy
         env:
           PUBLISH_POLICY: ${{ inputs.publish_policy }}

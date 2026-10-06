@@ -366,11 +366,14 @@ jobs:
             "on: pull_request_target",
             "on:\n  pull_request:\n  pull_request_target:",
         ):
-            for condition in (self.SKIP, "!startsWith(github.head_ref, 'codex/')"):
+            for condition in (
+                self.SKIP,
+                "\"!startsWith(github.head_ref, 'codex/')\"",
+                # A strip-chomped block scalar leaves exactly the expression.
+                "|-\n      ${{ !startsWith(github.head_ref, 'codex/') }}",
+            ):
                 with self.subTest(trigger=trigger, condition=condition):
-                    body = "permissions:\n  contents: read\njobs:\n" + self.credentialed_job(
-                        f'"{condition}"' if condition.startswith("!") else condition
-                    )
+                    body = "permissions:\n  contents: read\njobs:\n" + self.credentialed_job(condition)
                     completed = self.run_check({"preview.yml": workflow(body, trigger=trigger)})
                     self.assertEqual(completed.returncode, 0, completed.stderr)
 
@@ -411,6 +414,13 @@ jobs:
             "${{ !startsWith(github.head_ref, 'codex/') || true }}",
             "${{ !startsWith(github.head_ref, 'codex/') && github.actor != 'bot' || true }}",
             "${{ always() }}",
+            # GitHub treats text around ${{ }} as a string template, which is
+            # always true, so these run on codex/ branches despite the condition.
+            "|\n      ${{ !startsWith(github.head_ref, 'codex/') }}",
+            ">\n      ${{ !startsWith(github.head_ref, 'codex/') }}",
+            "\" ${{ !startsWith(github.head_ref, 'codex/') }}\"",
+            "\"${{ !startsWith(github.head_ref, 'codex/') }} \"",
+            "\"${{ !startsWith(github.head_ref, 'codex/') }}\\t\"",
         ):
             with self.subTest(condition=condition):
                 body = "permissions:\n  contents: read\njobs:\n" + self.credentialed_job(condition)
