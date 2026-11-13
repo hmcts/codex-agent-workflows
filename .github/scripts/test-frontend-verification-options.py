@@ -126,7 +126,8 @@ class FrontendVerificationOptionTests(unittest.TestCase):
                 self.assertEqual(
                     match.group("with"),
                     "          node-version: ${{ inputs.node_version_file == '' && inputs.node_version || '' }}\n"
-                    "          node-version-file: ${{ inputs.node_version_file }}\n",
+                    "          node-version-file: ${{ inputs.node_version_file }}\n"
+                    "          check-latest: true\n",
                     workflow.name,
                 )
         self.assertEqual(setups, 8)

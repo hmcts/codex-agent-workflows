@@ -80,7 +80,7 @@ Both reusable workflows take three optional inputs for frontend repositories. Th
   - The publish job treats the formatted patch as untrusted. It adopts the patch only when its hash matches the recorded verification and it touches no file outside the Codex patch, counting rename and copy sources. The job then runs the credential safety gate on the formatted tree before minting a token. The formatted output feeds post-publication verification and repair.
   - Draft PRs are still built from Codex's unformatted patch.
   - Any value other than `none` or `prettier` fails the run before anything else starts.
-- `node_version_file`: a repository file that pins the Node.js version for verification, such as `.nvmrc`. When set, it replaces `node_version`.
+- `node_version_file`: a repository file that pins the Node.js version for verification, such as `.nvmrc`. When set, it replaces `node_version`. Verification installs the newest release that matches the requested version rather than the runner image's cached copy, so `node_version: "22"` gets the latest 22.x; an exact version stays exact.
 - `frontend_fast_command`: passed to the local pipeline as `FRONTEND_FAST_COMMAND` in every credential-free verification, such as `yarn lint`. When empty, the pipeline keeps its own default.
 
 ## Review repairs before publication

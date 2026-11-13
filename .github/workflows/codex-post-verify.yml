@@ -115,6 +115,7 @@ jobs:
         with:
           node-version: ${{ inputs.node_version_file == '' && inputs.node_version || '' }}
           node-version-file: ${{ inputs.node_version_file }}
+          check-latest: true
 
       - name: Enable Corepack
         run: corepack enable
